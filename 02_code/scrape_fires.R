@@ -1,3 +1,8 @@
+library(jsonlite)
+library(tidyverse)
+library(sf)
+library(mapview)
+
 t <- tempfile(fileext = '.json')
 download.file('https://apps.npr.org/datawrapper/xse37/13/dataset.json', t)
 
@@ -41,10 +46,11 @@ warning <- tibble(
     z$feature$features[[1]]$geometry$coordinates[[10]][1, ,] %>% list() %>% st_polygon() # eaton warning zone
   )
 ) %>% 
-  st_as_sf(crs = 4326) 
+  st_as_sf(crs = 4326) %>%
+  mutate(source = 'https://www.npr.org/2025/01/08/nx-s1-5252587/los-angeles-fires-landmarks-culture-arts')
 
 
 dat <- bind_rows(mandatory, warning) 
 mapview(dat, zcol = 'type')
 
-write_sf(dat, 'jan_8_boundaries.geojson')
+write_sf(dat, 'jan_8_boundaries_npr.geojson')
