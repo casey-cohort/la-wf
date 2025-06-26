@@ -1,5 +1,6 @@
 .lintr
 01_data/*
+03_output/*
 
 # History files
 .Rhistory
