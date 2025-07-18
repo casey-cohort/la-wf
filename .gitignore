@@ -1,5 +1,5 @@
 .lintr
-01_data/*
+#01_data/*
 03_output/*
 
 # History files
