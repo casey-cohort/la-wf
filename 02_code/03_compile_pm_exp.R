@@ -236,12 +236,18 @@ keep_traj <- traj_full %>%
 # plot the trajectories with the fire location, and the stations colored by avg smoke PM2.5
 # to be a little lazy, save some of the plot layers that we'll keep reusing into a list to add to the plot
 plot_layers <- list(geom_sf(data = ca, inherit.aes = FALSE, fill = NA), 
-                    geom_sf(data = eaton_fire, col = "red", inherit.aes = FALSE), 
+                    geom_sf(data = eaton_fire, col = "#9A3334", fill = "#9A3334", alpha = 0.4, inherit.aes = FALSE), 
                     geom_sf(data = smokePM_avg, 
                             aes(color = smokePM), inherit.aes = FALSE), 
-                    scale_color_viridis_c(limits = c(NA, 25), oob = scales::squish),
+                    scale_color_viridis_c(limits = c(NA, 25), oob = scales::squish, name = "EPA station-specific mean PM \n January 7 - 13"),
                     xlim(200000, 700000), ylim(3650000, 3900000), 
-                    theme_classic() + theme(axis.title = element_blank()))
+                    theme_classic() + 
+                    theme(
+                      axis.title = element_blank(),
+                      axis.text = element_blank(),
+                      axis.ticks = element_blank(),
+                      axis.line = element_blank()
+                    ))
 
 {keep_traj %>%
   ggplot(aes(group = traj_id)) + 
@@ -270,12 +276,13 @@ keep_traj %>%
   purrr::map_dbl(length) %>% 
   cbind(smokePM_avg, n_point = .) %>% 
   {ggplot(data = ., aes(x = n_point, y = smokePM)) + 
-      geom_point(alpha = 0.6) + 
+      geom_point(alpha = 0.6, size = 6) + 
       geom_vline(xintercept = thresh_high) + 
       geom_vline(xintercept = thresh_low) + 
       annotate("text", x = 125, y = 5, label = paste0("cor = ", round(cor(.$n_point, .$smokePM), 3))) + 
-      xlab("n buffered traj overlapping") + ylab("average smoke pm2.5") + 
-      theme_classic()}
+      xlab("Number of buffered \ntrajectories overlapping") + ylab("Average smoke pm2.5") + 
+      theme_classic() + theme(axis.title = element_text(size = 18),
+                              axis.text = element_text(size = 16))}
 
 #--------------------------------
 # determine CT exposure: 
@@ -384,13 +391,29 @@ keep_traj_lines <- keep_traj %>%
   st_cast("LINESTRING")
 
 # plot 
+# first trip extra cts by intersecting exposure_df_corrected with ca state
+exposure_df_corrected <- exposure_df_corrected %>%
+  st_intersection(ca)
+
 {exposure_df_corrected %>%
   ggplot(aes(fill = smoke_category)) +
   geom_sf(color = NA, alpha = 0.9) +
   geom_sf(data = keep_traj_lines,
-          color = "grey80", alpha = 0.3, inherit.aes = FALSE)} %>% 
-  reduce(.x = plot_layers, .f = `+`, .init = .) 
-
+          color = "grey80", alpha = 0.8, inherit.aes = FALSE) +
+  scale_fill_manual(
+    values = c(
+      'none' = '#C0E6E0',    # light grey for none
+      'mid' = '#73C1B9',     # mid smoke 
+      'high' = '#2E8B8B'     # high smoke
+    ),
+    labels = c(
+      'none' = 'No smoke',
+      'mid' = 'Mid smoke', 
+      'high' = 'High smoke'
+    ),
+    name = "Smoke category"
+  )} %>%   
+  reduce(.x = plot_layers, .f = `+`, .init = .)
 
 
 #--------------------------------
