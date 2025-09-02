@@ -1,6 +1,6 @@
 #-------------------------------
 # LA wildfires project
-# author: Lauren Wilner
+# author: Nina Flores, adapted by Lauren Wilner
 # date: 2025-09-02
 # this code processes data that were generated using google earth engine
 # https://code.earthengine.google.com/d2d445308d1bfd4fe810ff138a3e68b3?noload=true
@@ -8,29 +8,34 @@
 
 #-------------------------------
 # setup
-require(data.table)
+# require(data.table)
 require(dplyr)
 require(tidyverse)
 
-setwd("/Users/laurenwilner/Library/CloudStorage/OneDrive-SharedLibraries-UW/casey_cohort\ -\ Documents/studies/la_wf_pm_evac_its/01_data/")
-gridmet_dat <- fread("01_raw/gridmet/gridmet-ct-LA-wf.csv")
+cov_dat_dir <- "/Users/laurenwilner/Library/CloudStorage/OneDrive-SharedLibraries-UW/casey_cohort\ -\ Documents/studies/la_wf_pm_evac_its/01_data/"
+exp_dat_dir <- "~/Desktop/Desktop/epidemiology_PhD/00_repos/la-wf/01_data/"
 
 #-------------------------------
 # exp data
 # read in gridmet data from gee 
+gridmet_dat <- fread(paste0(cov_dat_dir, "01_raw/gridmet/gridmet-ct-LA-wf_aug2025.csv"))
 gridmet_dat_clean <- gridmet_dat %>%
   mutate(date = as.Date(sub("_.*", "", `system:index`), format = "%Y%m%d")) %>%
   select(-`system:index`) %>%
   mutate(geoid10 = as.numeric(geoid10))
   
 # read in exposure data
-pm_exp_data <- read.csv("exposed_cts_pm.csv") %>%
-  select(-X) %>%
+pm_exp_data <- read_csv(paste0(exp_dat_dir, "02_clean/exposed_cts_pm.csv")) %>%
   rename(exp_level = exposed_pm) %>%
   select(geoid, exp_level)
-evac_exp_data <- read.csv("exposed_cts_evac.csv") %>%
-  select(-X) %>%
+evac_exp_data <- read_csv(paste0(exp_dat_dir, "02_clean/exposed_cts_evac.csv")) %>%
+  # recode so that we have an exp_level called "evac" and then only include those tracts
+  # the other tracts will be added using the smoke exposure data 
+  # we dont need them here bc `not exposed` will come from smoke data
+  # evac just overrides any smoke classification
+  mutate(exposed_evac = ifelse(exposed_evac == 1, "evac", "no_evac")) %>% 
   rename(exp_level = exposed_evac) %>%
+  filter(exp_level == "evac") %>%
   select(geoid, exp_level)
 
 # remove any cts from pm_exp_data that are also in evac_exp_data
@@ -58,5 +63,5 @@ grouped_gridmet <- data_with_gridmet  %>%
 
 #-------------------------------
 # write
-write.csv(grouped_gridmet,"02_processed/gridmet/gridmet_cov_exp_level.csv")
+write.csv(grouped_gridmet,paste0(cov_dat_dir, "02_processed/gridmet/gridmet_cov_exp_level.csv"))
 
