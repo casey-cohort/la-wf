@@ -236,12 +236,18 @@ keep_traj <- traj_full %>%
 # plot the trajectories with the fire location, and the stations colored by avg smoke PM2.5
 # to be a little lazy, save some of the plot layers that we'll keep reusing into a list to add to the plot
 plot_layers <- list(geom_sf(data = ca, inherit.aes = FALSE, fill = NA), 
-                    geom_sf(data = eaton_fire, col = "red", inherit.aes = FALSE), 
+                    geom_sf(data = eaton_fire, col = "#9A3334", fill = "#9A3334", alpha = 0.4, inherit.aes = FALSE), 
                     geom_sf(data = smokePM_avg, 
                             aes(color = smokePM), inherit.aes = FALSE), 
-                    scale_color_viridis_c(limits = c(NA, 25), oob = scales::squish),
+                    scale_color_viridis_c(limits = c(NA, 25), oob = scales::squish, name = "EPA station-specific mean PM \n January 7 - 13"),
                     xlim(200000, 700000), ylim(3650000, 3900000), 
-                    theme_classic() + theme(axis.title = element_blank()))
+                    theme_classic() + 
+                    theme(
+                      axis.title = element_blank(),
+                      axis.text = element_blank(),
+                      axis.ticks = element_blank(),
+                      axis.line = element_blank()
+                    ))
 
 {keep_traj %>%
   ggplot(aes(group = traj_id)) + 
@@ -270,12 +276,13 @@ keep_traj %>%
   purrr::map_dbl(length) %>% 
   cbind(smokePM_avg, n_point = .) %>% 
   {ggplot(data = ., aes(x = n_point, y = smokePM)) + 
-      geom_point(alpha = 0.6) + 
+      geom_point(alpha = 0.6, size = 6) + 
       geom_vline(xintercept = thresh_high) + 
       geom_vline(xintercept = thresh_low) + 
       annotate("text", x = 125, y = 5, label = paste0("cor = ", round(cor(.$n_point, .$smokePM), 3))) + 
-      xlab("n buffered traj overlapping") + ylab("average smoke pm2.5") + 
-      theme_classic()}
+      xlab("Number of buffered \ntrajectories overlapping") + ylab("Average smoke pm2.5") + 
+      theme_classic() + theme(axis.title = element_text(size = 18),
+                              axis.text = element_text(size = 16))}
 
 #--------------------------------
 # determine CT exposure: 
@@ -384,13 +391,29 @@ keep_traj_lines <- keep_traj %>%
   st_cast("LINESTRING")
 
 # plot 
+# first trip extra cts by intersecting exposure_df_corrected with ca state
+exposure_df_corrected <- exposure_df_corrected %>%
+  st_intersection(ca)
+
 {exposure_df_corrected %>%
   ggplot(aes(fill = smoke_category)) +
   geom_sf(color = NA, alpha = 0.9) +
   geom_sf(data = keep_traj_lines,
-          color = "grey80", alpha = 0.3, inherit.aes = FALSE)} %>% 
-  reduce(.x = plot_layers, .f = `+`, .init = .) 
-
+          color = "grey80", alpha = 0.8, inherit.aes = FALSE) +
+  scale_fill_manual(
+    values = c(
+      'none' = '#C0E6E0',    # light grey for none
+      'mid' = '#73C1B9',     # mid smoke 
+      'high' = '#2E8B8B'     # high smoke
+    ),
+    labels = c(
+      'none' = 'No smoke',
+      'mid' = 'Mid smoke', 
+      'high' = 'High smoke'
+    ),
+    name = "Smoke category"
+  )} %>%   
+  reduce(.x = plot_layers, .f = `+`, .init = .)
 
 
 #--------------------------------
@@ -411,130 +434,130 @@ write.csv(pm_exp,
 
 
 
-## SOME EXTRA PLOTS 
+# ## SOME EXTRA PLOTS 
 
 
 
 
 
-# map of centroids
-geom_centroids <- st_centroid(la_tracts_with_centroids)
-geom_coords <- st_coordinates(geom_centroids)
-geom_df <- data.frame(x = geom_coords[,1], y = geom_coords[,2], type = "Geometric centroids")
-census_df <- data.frame(x = la_ct_centroids$centroid_x, y = la_ct_centroids$centroid_y, type = "Census centroids")
-pop_df <- data.frame(x = la_tracts_with_centroids$centroid_x, y = la_tracts_with_centroids$centroid_y, type = "Pop-weighted centroids")
+# # map of centroids
+# geom_centroids <- st_centroid(la_tracts_with_centroids)
+# geom_coords <- st_coordinates(geom_centroids)
+# geom_df <- data.frame(x = geom_coords[,1], y = geom_coords[,2], type = "Geometric centroids")
+# census_df <- data.frame(x = la_ct_centroids$centroid_x, y = la_ct_centroids$centroid_y, type = "Census centroids")
+# pop_df <- data.frame(x = la_tracts_with_centroids$centroid_x, y = la_tracts_with_centroids$centroid_y, type = "Pop-weighted centroids")
 
-all_points <- rbind(geom_df, census_df, pop_df)
+# all_points <- rbind(geom_df, census_df, pop_df)
 
-ggplot() +
-  geom_sf(data = la_tracts_with_centroids, fill = NA, color = "gray60", size = 0.3, alpha = 0.7) +
-  geom_point(data = all_points, aes(x = x, y = y, color = type), size = 0.8, alpha = 0.7) +
-  geom_sf(data = eaton_fire, fill = "orange", color = "red", size = 1) +
-  scale_color_manual(name = "",
-                     values = c("Geometric centroids" = "#008080B3", 
-                                "Census centroids" = "#FFDB58B3", 
-                                "Pop-weighted centroids" = "#BAB86CB3")) +
-  labs(title = "CTs + 3 different centroid types") +
-  theme_void() + 
-  theme(plot.title = element_text(hjust = 0.5))
-
-
-
-## map out the diff between exposure_df and exposure_df_geom
-  exposure_df_geom <- traj_overlaps_geom %>% 
-    mutate(smoke_category = case_when(n_point < thresh_low ~ "none", 
-                                n_point < thresh_high ~ "mid", 
-                                n_point >= thresh_high ~ "high", 
-                                T ~ "error")) %>% 
-    select(GEOID10, n_point, smoke_category) 
+# ggplot() +
+#   geom_sf(data = la_tracts_with_centroids, fill = NA, color = "gray60", size = 0.3, alpha = 0.7) +
+#   geom_point(data = all_points, aes(x = x, y = y, color = type), size = 0.8, alpha = 0.7) +
+#   geom_sf(data = eaton_fire, fill = "orange", color = "red", size = 1) +
+#   scale_color_manual(name = "",
+#                      values = c("Geometric centroids" = "#008080B3", 
+#                                 "Census centroids" = "#FFDB58B3", 
+#                                 "Pop-weighted centroids" = "#BAB86CB3")) +
+#   labs(title = "CTs + 3 different centroid types") +
+#   theme_void() + 
+#   theme(plot.title = element_text(hjust = 0.5))
 
 
-# Get unique tracts from each dataset
-geom_tracts <- exposure_df_geom %>% 
-  filter(smoke_category != "none") %>%
-  distinct(GEOID10) %>% 
-  pull(GEOID10)
 
-regular_tracts <- exposure_df %>% 
-  filter(smoke_category != "none") %>%
-  distinct(GEOID10) %>% 
-  pull(GEOID10)
-
-# Find the difference
-missing_tracts <- setdiff(geom_tracts, regular_tracts)
-
-  exposure_df <- exposure_df %>% 
-    mutate(flag = ifelse(GEOID10 %in% missing_tracts, "missing_geom", "ok"))
+# ## map out the diff between exposure_df and exposure_df_geom
+#   exposure_df_geom <- traj_overlaps_geom %>% 
+#     mutate(smoke_category = case_when(n_point < thresh_low ~ "none", 
+#                                 n_point < thresh_high ~ "mid", 
+#                                 n_point >= thresh_high ~ "high", 
+#                                 T ~ "error")) %>% 
+#     select(GEOID10, n_point, smoke_category) 
 
 
-# Create the flag as you did
-exposure_df <- exposure_df %>% 
-    mutate(flag = ifelse(GEOID10 %in% missing_tracts, "missing_geom", "ok"))
+# # Get unique tracts from each dataset
+# geom_tracts <- exposure_df_geom %>% 
+#   filter(smoke_category != "none") %>%
+#   distinct(GEOID10) %>% 
+#   pull(GEOID10)
 
-# Create line geometries from the trajectory points
-keep_traj_lines <- keep_traj %>%
-  st_as_sf(coords = c("X11", "X10")) %>%
-  st_set_crs(crs) %>%
-  group_by(traj_id) %>%
-  summarize(do_union = FALSE) %>%
-  st_cast("LINESTRING")
+# regular_tracts <- exposure_df %>% 
+#   filter(smoke_category != "none") %>%
+#   distinct(GEOID10) %>% 
+#   pull(GEOID10)
 
-# Method 1: Separate the missing_geom tracts and plot them on top
-missing_tracts_df <- exposure_df %>% filter(flag == "missing_geom")
-ok_tracts_df <- exposure_df %>% filter(flag == "ok")
+# # Find the difference
+# missing_tracts <- setdiff(geom_tracts, regular_tracts)
 
-plot_base <- {
-  ok_tracts_df %>%
-    ggplot(aes(fill = smoke_category)) +
-    geom_sf(color = NA, alpha = 0.9) +
-    # Add missing tracts in red on top
-    geom_sf(data = missing_tracts_df, fill = "red", color = "darkred", 
-            alpha = 0.8, inherit.aes = FALSE) +
-    geom_sf(data = keep_traj_lines,
-            color = "grey80", alpha = 0.3, inherit.aes = FALSE)
-} %>% 
-  reduce(.x = plot_layers, .f = `+`, .init = .)
+#   exposure_df <- exposure_df %>% 
+#     mutate(flag = ifelse(GEOID10 %in% missing_tracts, "missing_geom", "ok"))
 
-# Method 2: Use a conditional fill with scale_fill_manual
-plot_conditional <- {
-  exposure_df %>%
-    ggplot() +
-    # First layer: normal tracts with smoke_category
-    geom_sf(data = exposure_df %>% filter(flag == "ok"), 
-            aes(fill = smoke_category), color = NA, alpha = 0.9) +
-    # Second layer: missing tracts in red
-    geom_sf(data = exposure_df %>% filter(flag == "missing_geom"), 
-            fill = "red", color = "darkred", alpha = 0.8) +
-    geom_sf(data = keep_traj_lines,
-            color = "grey80", alpha = 0.3, inherit.aes = FALSE)
-} %>% 
-  reduce(.x = plot_layers, .f = `+`, .init = .)
 
-# Method 3: Create a combined variable for coloring
-exposure_df <- exposure_df %>%
-  mutate(display_category = ifelse(flag == "missing_geom", "Missing Geom", smoke_category))
+# # Create the flag as you did
+# exposure_df <- exposure_df %>% 
+#     mutate(flag = ifelse(GEOID10 %in% missing_tracts, "missing_geom", "ok"))
 
-# Get original smoke_category colors and add red for missing
-original_colors <- scales::hue_pal()(length(unique(exposure_df$smoke_category[exposure_df$flag == "ok"])))
-names(original_colors) <- unique(exposure_df$smoke_category[exposure_df$flag == "ok"])
-all_colors <- c(original_colors, "Missing Geom" = "red")
+# # Create line geometries from the trajectory points
+# keep_traj_lines <- keep_traj %>%
+#   st_as_sf(coords = c("X11", "X10")) %>%
+#   st_set_crs(crs) %>%
+#   group_by(traj_id) %>%
+#   summarize(do_union = FALSE) %>%
+#   st_cast("LINESTRING")
 
-plot_combined <- {
-  exposure_df %>%
-    ggplot(aes(fill = display_category)) +
-    geom_sf(color = NA, alpha = 0.9) +
-    scale_fill_manual(values = rev(all_colors), name = "Category") +
-    geom_sf(data = keep_traj_lines,
-            color = "grey80", alpha = 0.3, inherit.aes = FALSE)
-} %>% 
-  reduce(.x = plot_layers, .f = `+`, .init = .)
+# # Method 1: Separate the missing_geom tracts and plot them on top
+# missing_tracts_df <- exposure_df %>% filter(flag == "missing_geom")
+# ok_tracts_df <- exposure_df %>% filter(flag == "ok")
 
-# Display the plots
-print("Method 1 - Layered approach:")
-print(plot_base)
+# plot_base <- {
+#   ok_tracts_df %>%
+#     ggplot(aes(fill = smoke_category)) +
+#     geom_sf(color = NA, alpha = 0.9) +
+#     # Add missing tracts in red on top
+#     geom_sf(data = missing_tracts_df, fill = "red", color = "darkred", 
+#             alpha = 0.8, inherit.aes = FALSE) +
+#     geom_sf(data = keep_traj_lines,
+#             color = "grey80", alpha = 0.3, inherit.aes = FALSE)
+# } %>% 
+#   reduce(.x = plot_layers, .f = `+`, .init = .)
 
-print("Method 2 - Conditional layers:")
-print(plot_conditional)
+# # Method 2: Use a conditional fill with scale_fill_manual
+# plot_conditional <- {
+#   exposure_df %>%
+#     ggplot() +
+#     # First layer: normal tracts with smoke_category
+#     geom_sf(data = exposure_df %>% filter(flag == "ok"), 
+#             aes(fill = smoke_category), color = NA, alpha = 0.9) +
+#     # Second layer: missing tracts in red
+#     geom_sf(data = exposure_df %>% filter(flag == "missing_geom"), 
+#             fill = "red", color = "darkred", alpha = 0.8) +
+#     geom_sf(data = keep_traj_lines,
+#             color = "grey80", alpha = 0.3, inherit.aes = FALSE)
+# } %>% 
+#   reduce(.x = plot_layers, .f = `+`, .init = .)
 
-print("Method 3 - Combined categories:")
-print(plot_combined)
+# # Method 3: Create a combined variable for coloring
+# exposure_df <- exposure_df %>%
+#   mutate(display_category = ifelse(flag == "missing_geom", "Missing Geom", smoke_category))
+
+# # Get original smoke_category colors and add red for missing
+# original_colors <- scales::hue_pal()(length(unique(exposure_df$smoke_category[exposure_df$flag == "ok"])))
+# names(original_colors) <- unique(exposure_df$smoke_category[exposure_df$flag == "ok"])
+# all_colors <- c(original_colors, "Missing Geom" = "red")
+
+# plot_combined <- {
+#   exposure_df %>%
+#     ggplot(aes(fill = display_category)) +
+#     geom_sf(color = NA, alpha = 0.9) +
+#     scale_fill_manual(values = rev(all_colors), name = "Category") +
+#     geom_sf(data = keep_traj_lines,
+#             color = "grey80", alpha = 0.3, inherit.aes = FALSE)
+# } %>% 
+#   reduce(.x = plot_layers, .f = `+`, .init = .)
+
+# # Display the plots
+# print("Method 1 - Layered approach:")
+# print(plot_base)
+
+# print("Method 2 - Conditional layers:")
+# print(plot_conditional)
+
+# print("Method 3 - Combined categories:")
+# print(plot_combined)
