@@ -25,7 +25,7 @@ options(scipen = 999)
 
 # set paths 
 ## LBW TO DO: edit this so that it pulls from working dir rather than a hardcoded path. 
-source("~/Desktop/Desktop/epidemiology_PhD/00_repos/la-wf/02_code/paths.R")
+source(paste0(getwd(), "/02_code/paths.R"))
 
 #-------------------------------
 # params
