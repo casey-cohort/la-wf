@@ -12,23 +12,23 @@
 require(dplyr)
 require(tidyverse)
 
-cov_dat_dir <- "/Users/laurenwilner/Library/CloudStorage/OneDrive-SharedLibraries-UW/casey_cohort\ -\ Documents/studies/la_wf_pm_evac_its/01_data/"
-exp_dat_dir <- "~/Desktop/Desktop/epidemiology_PhD/00_repos/la-wf/01_data/"
+# set paths
+source("~/Desktop/Desktop/epidemiology_PhD/00_repos/la-wf/02_code/paths.R")
 
 #-------------------------------
 # exp data
 # read in gridmet data from gee 
-gridmet_dat <- fread(paste0(cov_dat_dir, "01_raw/gridmet/gridmet-ct-LA-wf_aug2025.csv"))
+gridmet_dat <- fread(paste0(path_onedrive, "01_data/01_raw/gridmet/gridmet-ct-LA-wf_aug2025.csv"))
 gridmet_dat_clean <- gridmet_dat %>%
   mutate(date = as.Date(sub("_.*", "", `system:index`), format = "%Y%m%d")) %>%
   select(-`system:index`) %>%
   mutate(geoid10 = as.numeric(geoid10))
   
 # read in exposure data
-pm_exp_data <- read_csv(paste0(exp_dat_dir, "02_clean/exposed_cts_pm.csv")) %>%
+pm_exp_data <- read_csv(paste0(path_repo, "01_data/02_clean/exposed_cts_pm.csv")) %>%
   rename(exp_level = exposed_pm) %>%
   select(geoid, exp_level)
-evac_exp_data <- read_csv(paste0(exp_dat_dir, "02_clean/exposed_cts_evac.csv")) %>%
+evac_exp_data <- read_csv(paste0(path_repo, "01_data/02_clean/exposed_cts_evac.csv")) %>%
   # recode so that we have an exp_level called "evac" and then only include those tracts
   # the other tracts will be added using the smoke exposure data 
   # we dont need them here bc `not exposed` will come from smoke data
@@ -63,5 +63,5 @@ grouped_gridmet <- data_with_gridmet  %>%
 
 #-------------------------------
 # write
-write.csv(grouped_gridmet,paste0(cov_dat_dir, "02_processed/gridmet/gridmet_cov_exp_level.csv"))
+write.csv(grouped_gridmet,paste0(path_onedrive, "01_data/02_processed/gridmet/gridmet_cov_exp_level.csv"))
 
