@@ -24,6 +24,7 @@ options(digits = 7)
 options(scipen = 999)
 
 # set paths 
+## LBW TO DO: edit this so that it pulls from working dir rather than a hardcoded path. 
 source("~/Desktop/Desktop/epidemiology_PhD/00_repos/la-wf/02_code/paths.R")
 
 #-------------------------------
@@ -53,8 +54,11 @@ datasets <- c("df_ED_evac", "df_IP_evac", "df_ED_high_smoke",
 ## LBW comment: TODO PULL THIS IN PROGRAMMATICALLY
 encounter_types <- c( "num_enc", "num_enc_resp", "num_enc_cardio",  "num_enc_neuro", "num_enc_injury")
 
+# loop over three variables instead of these datasets: visit type var, exposure level variable, cause type variable
+# so then lines 49-55 will go away anyway. 
+
 # Iterate over each dataset and encounter type combo
-## LBW COMMENT: CAN WE DO THIS IN PARALLEL? 
+## LBW COMMENT: CAN WE DO THIS IN PARALLEL? this takes 2 hours. not super vital to parallelize this, more important for the next script. give it a go.
 for (dataset_name in datasets) {
     print(dataset_name)
   
@@ -68,7 +72,7 @@ for (dataset_name in datasets) {
                         ".csv")) %>%
       mutate(date = as.Date(date))
     
-    ## LBW COMMENT: should this happen in data cleaning script?
+    ## LBW COMMENT: should this happen in data cleaning script? move to its prep script.
     df_train_test_encounter <- df_train_test %>%
       select(date, all_of(encounter_type), pr, tmmx, tmmn, rmin, rmax, vs, srad, postjan7, time_period, influenza.a, influenza.b, rsv, sars.cov2) %>%
       mutate(influenza.a = influenza.a * 10000000,
@@ -76,26 +80,27 @@ for (dataset_name in datasets) {
              rsv = rsv * 10000000,
              sars.cov2 = sars.cov2*10000000) %>%
       mutate(across(where(is.numeric), as.integer)) %>%
-      # filter(date>= "2023-01-01") %>% # for respiratory Virtual only
       arrange(date)
     
     ## split data into training and test sets -------------------------------------
     splits <- df_train_test_encounter |>
       time_series_split(
-        #assess = "57 days", # for Virtual/Resp 
-        assess = "75 days", 
+        assess = "75 days", # LBW comment: what is this and how do we choose it? we took 30% of the total training period, which is the before the outcome time. we have two seasons with 90ish days, one with 60ish days, so we had about 250 days total and so the assess period is 75 days. the assess period is the period you are using to train the model. 
+        skip = "75 days",    # same as the assess period to avoid overlapping. with this, it takes 75 days then it skips 75 days then it takes the next 75 days. if you dont have this, then it takes the first 75 days and then starts the next 75 days right after the first 75 days.
         cumulative = TRUE,
         date_var = date
       )
-    
+    # NOTE: for now do the same for respiratory and then change later if needed. 
+
     ## resample data ---------------------------------------------------
     resamples_kfold <- training(splits) |> 
       time_series_cv(
-        # assess = "25 days",     # for Virtual/Resp 
-        assess = "40 days",     
+        assess = "40 days", # LBW comment: what is this and how do we choose it? 40 days is X% of what is left. if you do 250-75, you get 175. Then 40 is about 25% of that. so during the 75 days, it resamples 8 times for a 40 day period within each 75 day sub period. essentially training and testing for different sub time periods within the training period.    
         slice_limit = 8,        
-        cumulative = TRUE       
+        cumulative = TRUE # should we change this to FALSE? how does this interact with skip command?
       )
+    
+    # NOTE: talk to arnab about assess + cumulative decisions and how it works.
     
     ## recipe for modeling ---------------------------------------------------
     formula <- as.formula(paste(encounter_type, "~ ."))
@@ -104,8 +109,6 @@ for (dataset_name in datasets) {
     rec_obj_phxgb <- recipe(formula, training(splits)) |>
       # Time series features 
       step_holiday(date, holidays = timeDate::listHolidays("US")) |>
-      step_rm(matches("date_USInaugurationDay", "date_USCPulaskisBirthday", "date_USJuneteenthNationalIndependenceDay",
-                      "date_USDecorationMemorialDay")) |> # Remove irrelevant holiday data
       # Minimal seasonal components
       step_mutate(
         month=factor(month(date)),
@@ -119,17 +122,20 @@ for (dataset_name in datasets) {
             "01-20",  # Martin Luther King Jr. Day
             "07-04",  # Independence Day
             "12-25"   # Christmas Day
-          ), "business_closed", "business_open"
+          ), "business_closed", "business_open" # note we dont have thanksgiving specified here since the date changes, but it is in the holiday var.
         ))
       ) |>
-      step_rm(month_day) |>
-      step_novel(all_nominal()) |> 
+      step_rm(month_day) |> # only used this to find kaiser holidays and remove, so dropping this var here
+      step_novel(all_nominal()) |> # makes this recipe generalizable to a different dataset (e.g., our post event data)
       # cleaning steps
-      step_rm(matches("(.iso$)|(.xts$)|(.minute)|(.second)|(.hour)|(.am.pm)")) |>
-      step_zv() |>
+      step_rm(matches("(.iso$)|(.xts$)|(.minute)|(.second)|(.hour)|(.am.pm)")) |> # removing subdaily measures in our time series that we dont need
+      step_zv("date_USInaugurationDay", "date_USCPulaskisBirthday", "date_USJuneteenthNationalIndependenceDay",
+                      "date_USDecorationMemorialDay", "date_USColumbusDay", "date_USGoodFriday",
+                      "date_USIndependenceDay", "date_USLaborDay", "date_USLincolnsBirthday", "date_USMemorialDay", "date_USPresidentsDay",
+                      "date_USWashingtonsBirthday") |> # remove holidays that fall outside our study period
       step_normalize(all_numeric_predictors())
     
-    rec_obj_phxgb |> prep() |> juice() |> colnames()
+    rec_obj_phxgb |> prep() |> juice() |> colnames() # returns all variables in the model
     
     ## specify models ---------------------------------------------------
     model_phxgb_tune <- prophet_boost(
@@ -146,9 +152,8 @@ for (dataset_name in datasets) {
     ) |>
       set_engine("prophet_xgboost",
                 #  set.seed = 0112358, # LBW comment: why do we set the seed again here?? 
-                 early_stop = TRUE,
+                 early_stop = TRUE, # if the model is performing well, it will stop early. do we want this to be true? 
                  validation = 0.2)
-    # validation = 0.3) # for Virtual resp
     
     # generate grid for tuning ---------------------------------------------------
     
