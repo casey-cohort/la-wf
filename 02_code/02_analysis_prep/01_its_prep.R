@@ -1,16 +1,16 @@
 #-------------------------------
 # LA ITS prep
-# author: Arnab Dey and Lara Schwarz, adapted by Lauren Wilner
+# author: Lara Schwarz, adapted by Lauren Wilner
 # date: 2025-09-02
 # this code preps all data for the interrupted time series analysis
 
 #-------------------------------
 # load packages
 if (!requireNamespace('pacman', quietly = TRUE)) {install.packages('pacman')}
-pacman::p_load(readr, dplyr, tidyr, purrr, lubridate, MMWRweek, here)
+pacman::p_load(tidyverse, readr, tidyr, purrr, lubridate, MMWRweek, here)
 
 # set paths
-source("~/Desktop/Desktop/epidemiology_PhD/00_repos/la-wf/02_code/paths.R")
+source(paste0(getwd(), "/02_code/paths.R"))
 
 #-------------------------------
 # load data
@@ -27,6 +27,7 @@ resp_virus<- read_csv(paste0(path_onedrive, "01_data/02_processed/wastewater_res
 # add meterological covariates
 cov <- read_csv(paste0(path_onedrive, "01_data/02_processed/gridmet/gridmet_cov_exp_level.csv")) %>%
   mutate(encounter_dt = date) %>%
+  rename(exposure_category = exp_level) %>%
   select(-date)
 
 #-------------------------------
@@ -54,7 +55,7 @@ df <- df %>%
   select(-c(time_period))
 
 # Merge in environmental covariates
-df <- left_join(df, cov, relationship = "many-to-many")
+df <- left_join(df, cov, by = c("exposure_category", "encounter_dt"), relationship = "many-to-many")
 
 # Ensure date column is in Date format
 df <- df %>% 
@@ -98,7 +99,6 @@ for (dataset_name in names(outcome_enc_datasets)) {
       date = as.Date(encounter_dt),
       month_day = format(date, "%m-%d"),
       year = year(date),
-      # LBW note: do we want to use this same cutoff?? i think yes? 
       postjan7 = ifelse(month_day < "01-07" | month_day > "01-21", 0, 1)
     ) %>%
     filter(!(month_day > "01-06" & year == 2025)) %>%
@@ -120,20 +120,3 @@ for (dataset_name in names(outcome_enc_datasets)) {
   
   write.csv(df_all_cases, paste0(path_repo, paste0( "01_data/02_clean/test_train/df-predict-sf_", dataset_name, ".csv")), row.names = FALSE)
 }
-
-## LBW note: we dont need this, right? 
-# #--------------- create denominator data for analysis----------------------------#
-# # create dataset with denominator to merge in
-
-# # Create a separate dataset with dataset names and denom
-# denom_df <- out_enc_data %>%
-#   select(dataset_name, denom)
-
-# # Print or save denom_df
-# print(denom_df)
-
-# #write.csv(denom_df, here(mod, "denoms_df.csv"))
-# write.csv(denom_df, here(mod, "denoms_df_10km.csv"))
-
-# # Clean up
-# rm(list = ls())
