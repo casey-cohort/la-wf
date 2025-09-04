@@ -13,12 +13,12 @@ require(dplyr)
 require(tidyverse)
 
 # set paths
-source("~/Desktop/Desktop/epidemiology_PhD/00_repos/la-wf/02_code/paths.R")
+source(paste0(getwd(), "/02_code/paths.R"))
 
 #-------------------------------
 # exp data
 # read in gridmet data from gee 
-gridmet_dat <- fread(paste0(path_onedrive, "01_data/01_raw/gridmet/gridmet-ct-LA-wf_aug2025.csv"))
+gridmet_dat <- read_csv(paste0(path_onedrive, "01_data/01_raw/gridmet/gridmet-ct-LA-wf_aug2025.csv"))
 gridmet_dat_clean <- gridmet_dat %>%
   mutate(date = as.Date(sub("_.*", "", `system:index`), format = "%Y%m%d")) %>%
   select(-`system:index`) %>%
