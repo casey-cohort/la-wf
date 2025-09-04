@@ -24,7 +24,6 @@ options(digits = 7)
 options(scipen = 999)
 
 # set paths 
-## LBW TO DO: edit this so that it pulls from working dir rather than a hardcoded path. 
 source(paste0(getwd(), "/02_code/paths.R"))
 
 #-------------------------------
@@ -73,14 +72,14 @@ for (dataset_name in datasets) {
       mutate(date = as.Date(date))
     
     ## LBW COMMENT: should this happen in data cleaning script? move to its prep script.
-    df_train_test_encounter <- df_train_test %>%
-      select(date, all_of(encounter_type), pr, tmmx, tmmn, rmin, rmax, vs, srad, postjan7, time_period, influenza.a, influenza.b, rsv, sars.cov2) %>%
-      mutate(influenza.a = influenza.a * 10000000,
-             influenza.b = influenza.b * 10000000,
-             rsv = rsv * 10000000,
-             sars.cov2 = sars.cov2*10000000) %>%
-      mutate(across(where(is.numeric), as.integer)) %>%
-      arrange(date)
+    df_train_test_encounter <- df_train_test # %>%
+      # select(date, all_of(encounter_type), pr, tmmx, tmmn, rmin, rmax, vs, srad, postjan7, time_period, influenza.a, influenza.b, rsv, sars.cov2) %>%
+      # mutate(influenza.a = influenza.a * 10000000,
+      #        influenza.b = influenza.b * 10000000,
+      #        rsv = rsv * 10000000,
+      #        sars.cov2 = sars.cov2*10000000) %>%
+      # mutate(across(where(is.numeric), as.integer)) %>%
+      # arrange(date)
     
     ## split data into training and test sets -------------------------------------
     splits <- df_train_test_encounter |>

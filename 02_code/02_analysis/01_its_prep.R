@@ -73,7 +73,6 @@ df <- df %>%
 
 #-------------------------------
 # split data by encounter type and exposure level and create individual datasets
-## LBW note: do we want to change this?? 
 out_enc_data <- df %>%
   select(enc_type, exposure_category, encounter_dt, num_enc, 
          num_enc_cardio, num_enc_resp, num_enc_neuro, num_enc_injury,
@@ -103,7 +102,14 @@ for (dataset_name in names(outcome_enc_datasets)) {
     ) %>%
     filter(!(month_day > "01-06" & year == 2025)) %>%
     select(num_enc, num_enc_cardio, num_enc_resp, num_enc_neuro, num_enc_injury, date,
-           pr, tmmx, tmmn, rmin, rmax, vs, srad, postjan7, time_period, `influenza-a`, `influenza-b`, rsv, `sars-cov2`)
+           pr, tmmx, tmmn, rmin, rmax, vs, srad, postjan7, time_period, `influenza-a`, `influenza-b`, rsv, `sars-cov2`) %>%
+      mutate(`influenza-a` = `influenza-a` * 10000000,
+             `influenza-b` = `influenza-b` * 10000000,
+             rsv = rsv * 10000000,
+             `sars-cov2` = `sars-cov2` * 10000000) %>%
+      mutate(across(where(is.numeric), as.integer)) %>%
+      arrange(date)
+
   
   write.csv(df_train_test, paste0(path_repo, paste0( "01_data/02_clean/test_train/df-train-test_sf_", dataset_name, ".csv")), row.names = FALSE)
 
