@@ -149,7 +149,7 @@ for (enc in unique(df_train_test$enc_type)) {
       
       # generate grid for tuning---------------------------------------------------
       
-      grid_phxgb_tune <- grid_space_filling(
+      'grid_phxgb_tune' <- grid_space_filling(
         extract_parameter_set_dials(model_phxgb_tune) |>
           update(
             # XGBoost parameters 
@@ -214,3 +214,8 @@ for (enc in unique(df_train_test$enc_type)) {
 
 # save nested data
 save(all_results, file = paste0(path_repo, "03_output/all_model_tuning_results.RData"))
+
+
+
+
+

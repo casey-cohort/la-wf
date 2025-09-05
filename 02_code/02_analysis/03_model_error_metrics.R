@@ -4,8 +4,7 @@
 # date: 2025-09-02
 # this code loads the modeltime table and calculates training and testing error metrics
 
-
-
+#-------------------------------
 # Code adapted from the following project:
 
 # @project: Two-stage interrupted time series design
@@ -31,6 +30,9 @@ source(paste0(getwd(), "/02_code/paths.R"))
 df_preintervention_all <- read_csv(paste0(path_repo, "01_data/02_clean/test_train/df-train-test_sf.csv"))
 all_cases_all <-  read_csv(paste0(path_repo, "01_data/02_clean/test_train/df-predict-sf.csv"))
 
+# Load the consolidated model results
+load(paste0(path_repo, "03_output/all_model_tuning_results.RData"))
+
 # an empty list to store results
 results_list <- list()
 
@@ -38,53 +40,47 @@ results_list <- list()
 causes <- colnames(df_preintervention_all) %>% str_subset("^num_enc")
 
 # Iterate over each enc_type -- exposure_category -- cause combination 
-## LBW COMMENT: CAN WE DO THIS IN PARALLEL? this takes 2 hours. not super vital to parallelize this, more important for the next script. give it a go.
-
-# loop over each encounter type
-for (enc in unique(df$enc_type)) {
+for (enc in unique(df_preintervention_all$enc_type)) {
     print(enc)
 
   # loop through each exposure
-  for (exposure in unique(df$exposure_category)) {
+  for (exposure in unique(df_preintervention_all$exposure_category)) {
     print(exposure)
-    
+
     # subset data for this enc_type and exposure_category
     df_preintervention <- df_preintervention_all %>%
       filter(enc_type == enc, exposure_category == exposure)
-    
+
     # loop through each cause
     for (cause in causes) {
       print(cause)
 
       # -----------------------------------------------
-      # Load Prophet-XGBoost model
-      # Create a temporary environment
-      temp_env <- new.env()
+      # Extract the specific results for this combination
+      current_results <- all_results[[enc]][[exposure]][[cause]]
 
-      phxgb_filename <- paste0(path_repo, "03_output/all_model_tuning_results.RData")
-      load((phxgb_filename), envir = temp_env)
-      print(paste("Loaded Prophet-XGBoost model for", encounter_type,  dataset_name))
-      splits<-temp_env$splits
+      # Extract individual objects
+      splits <- current_results$splits
+      wflw_phxgb_tune <- current_results$wflw_phxgb_tune
+      tune_results_phxgb <- current_results$tune_results_phxgb
+
+      print(paste("Loaded Prophet-XGBoost model for", enc, exposure, cause))
       #  -----------------------------------------------
-        # Tune model
-      wflw_phxgb_tune <- temp_env$wflw_phxgb_tune
-      tune_results_phxgb <- temp_env$tune_results_phxgb
-      splits <- temp_env$splits  
-      
+      # Tune model
       wflw_fit <- wflw_phxgb_tune |>
-        finalize_workflow(select_best(tune_results_phxgb, metric = "rmse")) |>
-        fit(training(splits))
-      
+                finalize_workflow(select_best(tune_results_phxgb, metric = "rmse")) |>
+                fit(training(splits))
+
       # generate modeltime table ---------------------------------------------------
       model_tbl <- modeltime_table(wflw_fit)
-      
+
       # Training error metrics ---------------------------------------------------
       training_preds <- model_tbl %>%
         modeltime_calibrate(new_data = training(splits)) %>%
         select(.model_desc, .calibration_data) %>%
         unnest(cols = c(.calibration_data)) %>%
         mutate(.model_desc = "PROPHETXGB")
-      
+
       df_training_metrics <- training_preds %>%
         group_by(.model_desc) %>%
         summarise(
@@ -97,18 +93,19 @@ for (enc in unique(df$enc_type)) {
           r2 = round(1 - sum((.actual - .prediction)^2) / sum((.actual - mean(.actual))^2), 2)
         ) %>%
         mutate(
-          dataset = dataset_name,
-          encounter_type = encounter_type,
+          enc_type = enc,
+          exposure_category = exposure,
+          cause = cause,
           data_type = "training"
         )
-      
+
       # Testing error metrics ----------------------------------------------------
       test_preds <- model_tbl %>%
         modeltime_calibrate(new_data = testing(splits)) %>%
         select(.model_desc, .calibration_data) %>%
         unnest(cols = c(.calibration_data)) %>%
         mutate(.model_desc = "PROPHETXGB")
-      
+
       df_testing_metrics <- test_preds %>%
         group_by(.model_desc) %>%
         summarise(
@@ -121,22 +118,24 @@ for (enc in unique(df$enc_type)) {
           r2 = round(1 - sum((.actual - .prediction)^2) / sum((.actual - mean(.actual))^2), 2)
         ) %>%
         mutate(
-          dataset = dataset_name,
-          encounter_type = encounter_type,
+          enc_type = enc,
+          exposure_category = exposure,
+          cause = cause,
           data_type = "testing"
         )
-      
+
       print(df_training_metrics)
       print(df_testing_metrics)
-      
+
       # Append results
       results_list[[length(results_list) + 1]] <- df_training_metrics
       results_list[[length(results_list) + 1]] <- df_testing_metrics
-      
+
       # Save individual metrics
-      saveRDS(df_training_metrics, paste0(path_repo, "03_output/2.1-model-training-errors_", dataset_name, "_", encounter_type, ".rds"))
-      saveRDS(df_testing_metrics, paste0(path_repo, "03_output/2.1-model-test-errors_", dataset_name, "_", encounter_type, ".rds"))
-        }
+      # saveRDS(df_training_metrics, paste0(path_repo, "03_output/model-training-errors", enc, "_", exposure, "_", cause, ".rds"))
+      # saveRDS(df_testing_metrics, paste0(path_repo, "03_output/model-test-errors", enc, "_", exposure, "_", cause, ".rds"))
+      }
+    }
   }
 
 # Combine all metrics into one table ------------------------------------------
