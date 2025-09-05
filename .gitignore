@@ -1,6 +1,7 @@
 .lintr
 01_data/*
 03_output/*
+04_plots/*
 paths.R
 
 # History files

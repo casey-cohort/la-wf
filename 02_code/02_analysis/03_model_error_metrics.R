@@ -26,11 +26,12 @@ options(scipen = 999)
 # set paths 
 source(paste0(getwd(), "/02_code/paths.R"))
 
-# load data ---------------------------------------------------
+#-------------------------------
+# load data 
 df_preintervention_all <- read_csv(paste0(path_repo, "01_data/02_clean/test_train/df-train-test_sf.csv"))
 all_cases_all <-  read_csv(paste0(path_repo, "01_data/02_clean/test_train/df-predict-sf.csv"))
 
-# Load the consolidated model results
+# load model tuning results
 load(paste0(path_repo, "03_output/all_model_tuning_results.RData"))
 
 # an empty list to store results
@@ -39,6 +40,7 @@ results_list <- list()
 # cause vars to loop over
 causes <- colnames(df_preintervention_all) %>% str_subset("^num_enc")
 
+#-------------------------------
 # Iterate over each enc_type -- exposure_category -- cause combination 
 for (enc in unique(df_preintervention_all$enc_type)) {
     print(enc)
@@ -55,8 +57,7 @@ for (enc in unique(df_preintervention_all$enc_type)) {
     for (cause in causes) {
       print(cause)
 
-      # -----------------------------------------------
-      # Extract the specific results for this combination
+      # Extract the specific results for this combination -----------------------------------------------
       current_results <- all_results[[enc]][[exposure]][[cause]]
 
       # Extract individual objects
@@ -65,81 +66,124 @@ for (enc in unique(df_preintervention_all$enc_type)) {
       tune_results_phxgb <- current_results$tune_results_phxgb
 
       print(paste("Loaded Prophet-XGBoost model for", enc, exposure, cause))
-      #  -----------------------------------------------
-      # Tune model
-      wflw_fit <- wflw_phxgb_tune |>
-                finalize_workflow(select_best(tune_results_phxgb, metric = "rmse")) |>
-                fit(training(splits))
+      
+      # RETRY LOGIC -----------------------------------------------
+      max_retries <- 3
+      retry_count <- 0
+      success <- FALSE
+      wflw_fit <- NULL
 
-      # generate modeltime table ---------------------------------------------------
-      model_tbl <- modeltime_table(wflw_fit)
-
-      # Training error metrics ---------------------------------------------------
-      training_preds <- model_tbl %>%
-        modeltime_calibrate(new_data = training(splits)) %>%
-        select(.model_desc, .calibration_data) %>%
-        unnest(cols = c(.calibration_data)) %>%
-        mutate(.model_desc = "PROPHETXGB")
-
-      df_training_metrics <- training_preds %>%
-        group_by(.model_desc) %>%
-        summarise(
-          mdae = Metrics::mdae(.actual, .prediction),
-          mae = Metrics::mae(.actual, .prediction),
-          rmse = Metrics::rmse(.actual, .prediction),
-          mape = Metrics::mape(.actual, .prediction),
-          rse = Metrics::rse(.actual, .prediction),
-          smape = Metrics::smape(.actual, .prediction),
-          r2 = round(1 - sum((.actual - .prediction)^2) / sum((.actual - mean(.actual))^2), 2)
-        ) %>%
-        mutate(
-          enc_type = enc,
-          exposure_category = exposure,
-          cause = cause,
-          data_type = "training"
-        )
-
-      # Testing error metrics ----------------------------------------------------
-      test_preds <- model_tbl %>%
-        modeltime_calibrate(new_data = testing(splits)) %>%
-        select(.model_desc, .calibration_data) %>%
-        unnest(cols = c(.calibration_data)) %>%
-        mutate(.model_desc = "PROPHETXGB")
-
-      df_testing_metrics <- test_preds %>%
-        group_by(.model_desc) %>%
-        summarise(
-          mdae = Metrics::mdae(.actual, .prediction),
-          mae = Metrics::mae(.actual, .prediction),
-          rmse = Metrics::rmse(.actual, .prediction),
-          mape = Metrics::mape(.actual, .prediction),
-          rse = Metrics::rse(.actual, .prediction),
-          smape = Metrics::smape(.actual, .prediction),
-          r2 = round(1 - sum((.actual - .prediction)^2) / sum((.actual - mean(.actual))^2), 2)
-        ) %>%
-        mutate(
-          enc_type = enc,
-          exposure_category = exposure,
-          cause = cause,
-          data_type = "testing"
-        )
-
-      print(df_training_metrics)
-      print(df_testing_metrics)
-
-      # Append results
-      results_list[[length(results_list) + 1]] <- df_training_metrics
-      results_list[[length(results_list) + 1]] <- df_testing_metrics
-
-      # Save individual metrics
-      # saveRDS(df_training_metrics, paste0(path_repo, "03_output/model-training-errors", enc, "_", exposure, "_", cause, ".rds"))
-      # saveRDS(df_testing_metrics, paste0(path_repo, "03_output/model-test-errors", enc, "_", exposure, "_", cause, ".rds"))
+      while (!success && retry_count < max_retries) {
+        tryCatch({
+          # Set a different seed for each retry
+          # current_seed <- 0112358 + retry_count * 1000 + which(causes == cause) * 100
+          # set.seed(current_seed)
+          set.seed(0112358) 
+          
+          print(paste("  Attempt", retry_count + 1))
+          
+          wflw_fit <- wflw_phxgb_tune |>
+                    finalize_workflow(select_best(tune_results_phxgb, metric = "rmse")) |>
+                    fit(training(splits))
+          
+          # If we get here without error, it worked
+          success <- TRUE
+          print(paste("  Success on attempt", retry_count + 1))
+          
+        }, error = function(e) {
+          retry_count <<- retry_count + 1
+          print(paste("  Attempt", retry_count, "failed for", enc, exposure, cause, ":", e$message))
+          
+          if (retry_count >= max_retries) {
+            print(paste("  Max retries reached, skipping", enc, exposure, cause))
+          } else {
+            print(paste("  Retrying with different seed..."))
+          }
+        })
       }
+
+      # only proceed if we successfully fitted the model
+      if (success && !is.null(wflw_fit)) {
+        
+        # generate modeltime table ---------------------------------------------------
+        model_tbl <- modeltime_table(wflw_fit)
+
+        # training error metrics ---------------------------------------------------
+        training_preds <- model_tbl %>%
+          modeltime_calibrate(new_data = training(splits)) %>%
+          select(.model_desc, .calibration_data) %>%
+          unnest(cols = c(.calibration_data)) %>%
+          mutate(.model_desc = "PROPHETXGB")
+
+        df_training_metrics <- training_preds %>%
+          group_by(.model_desc) %>%
+          summarise(
+            mdae = Metrics::mdae(.actual, .prediction),
+            mae = Metrics::mae(.actual, .prediction),
+            rmse = Metrics::rmse(.actual, .prediction),
+            mape = Metrics::mape(.actual, .prediction),
+            rse = Metrics::rse(.actual, .prediction),
+            smape = Metrics::smape(.actual, .prediction),
+            r2 = round(1 - sum((.actual - .prediction)^2) / sum((.actual - mean(.actual))^2), 2),
+            .groups = 'drop'
+          ) %>%
+          mutate(
+            enc_type = enc,
+            exposure_category = exposure,
+            cause = cause,
+            data_type = "training"
+          )
+
+        # testing error metrics ----------------------------------------------------
+        test_preds <- model_tbl %>%
+          modeltime_calibrate(new_data = testing(splits)) %>%
+          select(.model_desc, .calibration_data) %>%
+          unnest(cols = c(.calibration_data)) %>%
+          mutate(.model_desc = "PROPHETXGB")
+
+        df_testing_metrics <- test_preds %>%
+          group_by(.model_desc) %>%
+          summarise(
+            mdae = Metrics::mdae(.actual, .prediction),
+            mae = Metrics::mae(.actual, .prediction),
+            rmse = Metrics::rmse(.actual, .prediction),
+            mape = Metrics::mape(.actual, .prediction),
+            rse = Metrics::rse(.actual, .prediction),
+            smape = Metrics::smape(.actual, .prediction),
+            r2 = round(1 - sum((.actual - .prediction)^2) / sum((.actual - mean(.actual))^2), 2),
+            .groups = 'drop'
+          ) %>%
+          mutate(
+            enc_type = enc,
+            exposure_category = exposure,
+            cause = cause,
+            data_type = "testing"
+          )
+
+        print(df_training_metrics)
+        print(df_testing_metrics)
+
+        # using named list entries to prevent duplicates
+        training_key <- paste(enc, exposure, cause, "training", sep = "_")
+        testing_key <- paste(enc, exposure, cause, "testing", sep = "_")
+        
+        results_list[[training_key]] <- df_training_metrics
+        results_list[[testing_key]] <- df_testing_metrics
+
+      } else {
+        print(paste("FAILED: Could not fit model for", enc, exposure, cause, "after", max_retries, "attempts"))
+      }
+
+      gc()
     }
   }
+}
 
-# Combine all metrics into one table ------------------------------------------
+#-------------------------------
+# combine all metrics into one table
 results_train_test_metrics <- bind_rows(results_list)
+print(paste("Final dataset has", nrow(results_train_test_metrics), "rows")) # should always be 80
 
-# Save final performance metrics
-write.csv(results_train_test_metrics, paste0(path_repo, "03_output/performance_metrics.csv"), row.names = FALSE)
+#-------------------------------
+# save final performance metrics
+write.csv(results_train_test_metrics, paste0(path_repo, "03_output/performance_metrics_parallel.csv"), row.names = FALSE)
