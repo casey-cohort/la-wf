@@ -26,9 +26,10 @@ resp_virus<- read_csv(paste0(path_onedrive, "01_data/02_processed/wastewater_res
 
 # add meterological covariates
 cov <- read_csv(paste0(path_onedrive, "01_data/02_processed/gridmet/gridmet_cov_exp_level.csv")) %>%
-  mutate(encounter_dt = date) %>%
-  rename(exposure_category = exp_level) %>%
-  select(-date)
+  mutate(encounter_dt = date,
+         exposure_category = ifelse(exp_level == "high", "high_smoke", 
+                            ifelse(exp_level == "mid", "mid_smoke", exp_level))) %>%
+  select(-date, -exp_level, -`...1`)
 
 #-------------------------------
 # restructure and merge in covariates
@@ -72,51 +73,50 @@ df <- df %>%
   drop_na(time_period)  # Remove rows outside defined time periods
 
 #-------------------------------
-# split data by encounter type and exposure level and create individual datasets
-## LBW note: do we want to change this?? 
-out_enc_data <- df %>%
+# 
+out_df <- df %>%
   select(enc_type, exposure_category, encounter_dt, num_enc, 
          num_enc_cardio, num_enc_resp, num_enc_neuro, num_enc_injury,
-          pr, tmmx, tmmn, rmin, rmax, vs, srad, time_period, `influenza-a`, `influenza-b`, rsv, `sars-cov2`) %>%
-  group_by(enc_type, exposure_category) %>%
-  nest() %>%
-  mutate(dataset_name = paste0("df_", enc_type, "_", exposure_category),
-         data = map2(data, dataset_name, ~mutate(.x, dataset_name = .y)))  # Add dataset_name column inside each dataset
-
-# list of datasets
-outcome_enc_datasets <- setNames(out_enc_data$data, out_enc_data$dataset_name)
+          pr, tmmx, tmmn, rmin, rmax, vs, srad, time_period, `influenza-a`, `influenza-b`, rsv, `sars-cov2`)
 
 #-------------------------------
-# create csvs of data for analysis
+# create training and testing dataset
+df_train_test <- out_df %>%
+  mutate(
+    date = as.Date(encounter_dt),
+    month_day = format(date, "%m-%d"),
+    year = year(date),
+    postjan7 = ifelse(month_day < "01-07" | month_day > "01-21", 0, 1)
+  ) %>%
+  filter(!(month_day > "01-06" & year == 2025)) %>%
+  select(-c('encounter_dt')) %>%
+    mutate(influenza.a = `influenza-a` * 10000000,
+            influenza.b = `influenza-b` * 10000000,
+            rsv = rsv * 10000000,
+            sars.cov2 = `sars-cov2` * 10000000) %>%
+    select(-c(`influenza-a`, `influenza-b`, `sars-cov2`)) %>%
+    mutate(across(where(is.numeric), as.integer)) %>%
+    arrange(date)
+  
+write.csv(df_train_test, paste0(path_repo, paste0( "01_data/02_clean/test_train/df-train-test_sf.csv")), row.names = FALSE)
 
-# Iterate through datasets and save as CSV
-for (dataset_name in names(outcome_enc_datasets)) {
-  dataset <- outcome_enc_datasets[[dataset_name]]
-  
-  # Create df_train_test dataset
-  df_train_test <- dataset %>%
-    mutate(
-      date = as.Date(encounter_dt),
-      month_day = format(date, "%m-%d"),
-      year = year(date),
-      postjan7 = ifelse(month_day < "01-07" | month_day > "01-21", 0, 1)
-    ) %>%
-    filter(!(month_day > "01-06" & year == 2025)) %>%
-    select(num_enc, num_enc_cardio, num_enc_resp, num_enc_neuro, num_enc_injury, date,
-           pr, tmmx, tmmn, rmin, rmax, vs, srad, postjan7, time_period, `influenza-a`, `influenza-b`, rsv, `sars-cov2`)
-  
-  write.csv(df_train_test, paste0(path_repo, paste0( "01_data/02_clean/test_train/df-train-test_sf_", dataset_name, ".csv")), row.names = FALSE)
+#-------------------------------
+# create all cases dataset
+df_all_cases <- out_df %>%
+  mutate(
+    date = as.Date(encounter_dt),
+    month_day = format(date, "%m-%d"),
+    year = year(date),
+    postjan7 = ifelse(month_day < "01-07" | month_day > "01-21", 0, 1)
+  ) %>%
+  filter(!(month_day > "01-06" & year == 2025)) %>%
+  select(-c('encounter_dt')) %>%
+  mutate(influenza.a = `influenza-a` * 10000000,
+            influenza.b = `influenza-b` * 10000000,
+            rsv = `rsv` * 10000000,
+            sars.cov2 = `sars-cov2` * 10000000) %>%
+  select(-c(`influenza-a`, `influenza-b`, `sars-cov2`)) %>%
+  mutate(across(where(is.numeric), as.integer)) %>%
+  arrange(date)
 
-  # Create df_all_cases dataset
-  df_all_cases <- dataset %>%
-    mutate(
-      date = as.Date(encounter_dt),
-      month_day = format(date, "%m-%d"),
-      year = year(date),
-      postjan7 = ifelse(month_day < "01-07" | month_day > "01-21", 0, 1)
-    ) %>%
-    select(num_enc, num_enc_cardio, num_enc_resp, num_enc_neuro, num_enc_injury, date,
-           pr, tmmx, tmmn, rmin, rmax, vs, srad, postjan7, time_period, `influenza-a`, `influenza-b`, rsv, `sars-cov2`)
-  
-  write.csv(df_all_cases, paste0(path_repo, paste0( "01_data/02_clean/test_train/df-predict-sf_", dataset_name, ".csv")), row.names = FALSE)
-}
+write.csv(df_all_cases, paste0(path_repo, paste0( "01_data/02_clean/test_train/df-predict-sf.csv")), row.names = FALSE)
