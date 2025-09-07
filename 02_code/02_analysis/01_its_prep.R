@@ -7,14 +7,14 @@
 #-------------------------------
 # load packages
 if (!requireNamespace('pacman', quietly = TRUE)) {install.packages('pacman')}
-pacman::p_load(tidyverse, readr, tidyr, purrr, lubridate, MMWRweek, here)
+pacman::p_load(tidyverse, readr, tidyr, purrr, lubridate, MMWRweek, here, arrow)
 
 # set paths
 source(paste0(getwd(), "/02_code/paths.R"))
 
 #-------------------------------
 # load data
-df_temp <- read_csv(paste0(path_onedrive, "01_data/01_raw/ed_ipt_dat/ENC_EXP_DAILY_08082025.csv")) %>% 
+df_temp <- read_csv(paste0(path_onedrive, "01_data/01_raw/ed_ipt_dat/08082025/ENC_EXP_DAILY_08082025.csv")) %>% 
    # clean names so there are no spaces -- this will help since we name datasets based on exp cat
    # if we change this system, we can change this! 
    mutate(exposure_category = str_replace_all(exposure_category, ",.*", ""),
@@ -98,7 +98,7 @@ df_train_test <- out_df %>%
     mutate(across(where(is.numeric), as.integer)) %>%
     arrange(date)
   
-write.csv(df_train_test, paste0(path_repo, paste0( "01_data/02_clean/test_train/df-train-test_sf.csv")), row.names = FALSE)
+write_parquet(df_train_test, paste0(path_repo, paste0( "01_data/02_clean/test_train/df-train-test_sf.parquet")))
 
 #-------------------------------
 # create all cases dataset
@@ -119,4 +119,4 @@ df_all_cases <- out_df %>%
   mutate(across(where(is.numeric), as.integer)) %>%
   arrange(date)
 
-write.csv(df_all_cases, paste0(path_repo, paste0( "01_data/02_clean/test_train/df-predict-sf.csv")), row.names = FALSE)
+write_parquet(df_all_cases, paste0(path_repo, paste0( "01_data/02_clean/test_train/df-predict-sf.parquet")))
