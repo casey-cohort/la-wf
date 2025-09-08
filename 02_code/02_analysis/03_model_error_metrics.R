@@ -16,7 +16,6 @@
 #-------------------------------
 # setup
 rm(list = ls())
-set.seed(0112358)
 pacman::p_load(here, tidymodels, tidyverse, modeltime, Metrics)
 
 # ensure consistent numeric precision 
@@ -31,8 +30,12 @@ source(paste0(getwd(), "/02_code/paths.R"))
 df_preintervention_all <- read_csv(paste0(path_repo, "01_data/02_clean/test_train/df-train-test_sf.csv"))
 all_cases_all <-  read_csv(paste0(path_repo, "01_data/02_clean/test_train/df-predict-sf.csv"))
 
-# load model tuning results
-load(paste0(path_repo, "03_output/all_model_tuning_results_parallel.RData"))
+# load latest model tuning results
+latest_file <- sort(list.files(paste0(path_repo, "03_output/"), 
+                              pattern = "^all_results_nested_.*\\.RData$", 
+                              full.names = TRUE), 
+                   decreasing = TRUE)[1]
+load(latest_file)
 
 # an empty list to store results
 results_list <- list()
@@ -65,10 +68,8 @@ for (enc in unique(df_preintervention_all$enc_type)) {
         next
       }
 
-      # Extract the specific results for this combination
+      # Extract the specific results for this combination & check if they are valid
       current_results <- all_results[[enc]][[exposure]][[cause]]
-
-      # Check if the results are valid
       if (is.null(current_results$success) || !current_results$success) {
         print(paste("SKIPPING: Failed results for", enc, exposure, cause))
         next
@@ -78,10 +79,9 @@ for (enc in unique(df_preintervention_all$enc_type)) {
       splits <- current_results$splits
       wflw_phxgb_tune <- current_results$wflw_phxgb_tune
       tune_results_phxgb <- current_results$tune_results_phxgb
-
       print(paste("Loaded Prophet-XGBoost model for", enc, exposure, cause))
       
-      # IMPROVED RETRY LOGIC -----------------------------------------------
+      # RETRY if it failed -----------------------------------------------
       max_retries <- 5
       retry_count <- 0
       success <- FALSE
@@ -89,13 +89,11 @@ for (enc in unique(df_preintervention_all$enc_type)) {
 
       while (!success && retry_count < max_retries) {
         tryCatch({
-          # Use different seeds and suppress warnings
-          current_seed <- 0112358 + retry_count * 1000 + which(causes == cause) * 100
-          set.seed(current_seed)
-          
-          print(paste("  Attempt", retry_count + 1, "with seed", current_seed))
-          
-          # Suppress XGBoost warnings during fitting
+
+          # fit the model 
+          wflw_fit_seed <- gen_seed(0112358, c(enc, exposure, cause, "wflw_fit"))
+          set.seed(wflw_fit_seed)
+          print(paste("  Attempt", retry_count + 1, "with seed", wflw_fit_seed))
           suppressWarnings({
             suppressMessages({
               wflw_fit <- wflw_phxgb_tune |>
@@ -104,14 +102,14 @@ for (enc in unique(df_preintervention_all$enc_type)) {
             })
           })
           
-          # Test if the model actually works by making a small prediction
+          # test if the model actually works by making a small prediction
           test_pred <- suppressWarnings({
             suppressMessages({
               predict(wflw_fit, new_data = head(training(splits), 5))
             })
           })
           
-          # If we get here without error and have valid predictions, it worked
+          # if we get here without error and have valid predictions, it worked
           if (!is.null(test_pred) && nrow(test_pred) > 0 && !any(is.na(test_pred$.pred))) {
             success <- TRUE
             print(paste("  Success on attempt", retry_count + 1))
@@ -120,19 +118,19 @@ for (enc in unique(df_preintervention_all$enc_type)) {
           }
           
         }, error = function(e) {
+          # retry if there was an error
           retry_count <<- retry_count + 1
           print(paste("  Attempt", retry_count, "failed for", enc, exposure, cause, ":", e$message))
-          
           if (retry_count >= max_retries) {
             print(paste("  Max retries reached, skipping", enc, exposure, cause))
           } else {
             print(paste("  Retrying with different seed..."))
-            Sys.sleep(1)  # Brief pause between retries
+            Sys.sleep(1)  # lets take a quick pause between retries
           }
         })
       }
 
-      # only proceed if we successfully fitted the model
+      # if we successfully fitted the model
       if (success && !is.null(wflw_fit)) {
         
         tryCatch({
@@ -143,7 +141,7 @@ for (enc in unique(df_preintervention_all$enc_type)) {
             })
           })
 
-          # training error metrics with error handling
+          # training error metrics
           training_preds <- suppressWarnings({
             suppressMessages({
               model_tbl %>%
@@ -175,7 +173,7 @@ for (enc in unique(df_preintervention_all$enc_type)) {
                 data_type = "training"
               )
 
-            # testing error metrics with error handling
+            # testing error metrics
             test_preds <- suppressWarnings({
               suppressMessages({
                 model_tbl %>%
@@ -186,7 +184,7 @@ for (enc in unique(df_preintervention_all$enc_type)) {
               })
             })
 
-            # Check if we have valid test predictions
+            # do we have valid test predictions?
             if (nrow(test_preds) > 0 && !all(is.na(test_preds$.prediction))) {
               df_testing_metrics <- test_preds %>%
                 group_by(.model_desc) %>%
@@ -219,17 +217,17 @@ for (enc in unique(df_preintervention_all$enc_type)) {
               results_list[[training_key]] <- df_training_metrics
               results_list[[testing_key]] <- df_testing_metrics
 
+
+            # error handling
             } else {
               print(paste("FAILED: Invalid test predictions for", enc, exposure, cause))
             }
           } else {
             print(paste("FAILED: Invalid training predictions for", enc, exposure, cause))
           }
-
         }, error = function(e) {
           print(paste("FAILED: Error in metrics calculation for", enc, exposure, cause, ":", e$message))
         })
-
       } else {
         print(paste("FAILED: Could not fit model for", enc, exposure, cause, "after", max_retries, "attempts"))
       }
@@ -242,11 +240,16 @@ for (enc in unique(df_preintervention_all$enc_type)) {
 #-------------------------------
 # combine all metrics into one table
 if (length(results_list) > 0) {
+  # combine all results into one dataframe
   results_train_test_metrics <- bind_rows(results_list)
   print(paste("Final dataset has", nrow(results_train_test_metrics), "rows"))
   
   # save final performance metrics
-  write.csv(results_train_test_metrics, paste0(path_repo, "03_output/performance_metrics_parallel.csv"), row.names = FALSE)
+  # pull out date and timestamp from original rdata obj to save this out with
+  timestamp <- tools::file_path_sans_ext(basename(latest_file)) %>%
+    str_replace("all_results_nested_", "")
+  results_filename <- paste0("performance_metrics_", timestamp, ".csv")
+  write.csv(results_train_test_metrics, paste0(path_repo, "03_output/", results_filename), row.names = FALSE)
   print("Performance metrics saved successfully")
 } else {
   print("WARNING: No successful results to save")
