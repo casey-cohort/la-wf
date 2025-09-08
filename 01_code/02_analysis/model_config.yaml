@@ -25,7 +25,7 @@ data_version: "dummy"
 #     cause: "num_enc_resp"
 #   - encounter_type: "ED"
 #     exposure_category: "smoke"
-#     cause: "num_enc_cardiac"
+#     cause: "num_enc_cardio"
 #
 models_to_run:
   encounter_type:

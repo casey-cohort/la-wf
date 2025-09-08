@@ -14,30 +14,38 @@
 # @date: Dec 16, 2024
 
 # TODO    
-# 2. integrate error metrics into this 
-# 3. versioning 
+# 1. version data stuff 
+# 2. add config hyperparams to output csv of metrics for easy vetting
+# 3. streamline both scripts and make sure they are doing what we think they are doing. 
+  # need to be able to get stable results when we run multiple times.
 
 #-------------------------------
 # setup
 rm(list = ls())
-pacman::p_load(modeltime, tidymodels, tidyverse, timetk, 
+pacman::p_load(modeltime, tidymodels, tidyverse, timetk, Metrics,
                tictoc, digest, yaml, arrow, future, furrr, progressr)
 
 # set paths 
-source(paste0(getwd(), "/02_code/paths.R"))
-source(paste0(getwd(), "/02_code/utils.R")) # this is where the tuning function comes from! 
+source(paste0(getwd(), "/01_code/paths.R"))
+source(paste0(getwd(), "/01_code/utils.R"))
+
+# determine version number, construct folder name, make folder, set suffix for model version
+ver <- gen_ver_number(paste0(path_onedrive, "02_output/"))
+folder_name <- paste0("model_run_", Sys.Date(), ".", ver, "/")
+dir.create(paste0(path_onedrive, "02_output/", folder_name), showWarnings = FALSE)
+mod_ver_suffix <- paste0(Sys.Date(), ".", ver)
 
 # read config 
-config <- read_config(paste0(path_repo, "02_code/02_analysis/model_config.yaml"))
+config <- read_config(paste0(path_repo, "01_code/02_analysis/model_config.yaml"))
 
 # write config
-write_config(config, paste0(path_repo, "03_output/model_config_", Sys.Date(), ".v", config$data_version, ".yaml"))
+write_config(config, paste0(path_onedrive, "02_output/", folder_name, "model_config_", mod_ver_suffix, ".yaml"))
 
 # ensure consistent numeric precision 
 options(digits = 7)
 options(scipen = 999)
 
-# set global seed 
+# set global seed for arg to tuning function
 global_seed <- 0112358
 
 #------------------------------
@@ -73,6 +81,12 @@ batch_size <- n_cores * 2
 n_batches <- ceiling(nrow(all_combinations) / batch_size)
 all_combination_results <- list()
 
+progressr::handlers(progressr::handler_progress(
+  format = "[:bar] :percent :current/:total ETA: :eta",
+  clear = TRUE,
+  width = 60
+))
+
 for (batch in 1:n_batches) {
   cat("\n=== Processing batch", batch, "of", n_batches, "===\n")
   
@@ -103,8 +117,8 @@ for (batch in 1:n_batches) {
   
   # Save intermediate results
   save(all_combination_results, 
-       file = paste0(path_repo, "03_output/intermediate_results_batch_", batch, ".RData"))
-  
+       file = paste0(path_onedrive, "02_output/", folder_name, "intermediate_results_batch_", batch, "_", mod_ver_suffix, ".RData"))
+
   cat("Completed", length(all_combination_results), "of", nrow(all_combinations), "combinations\n")
   
   # Memory cleanup every few batches
@@ -146,14 +160,62 @@ for (i in seq_along(all_combination_results)) {
 }
 
 #------------------------------
-# Save final results
-timestamp <- format(Sys.time(), "%Y%m%d_%H%M%S")
+# Calculate error metrics for successful models
+cat("\n=== Calculating error metrics ===\n")
 
+# Extract only successful results for metrics calculation
+successful_results <- all_combination_results[!errors]
+metrics_results <- list()
+
+if (length(successful_results) > 0) {
+  for (i in seq_along(successful_results)) {
+    result <- successful_results[[i]]
+    
+    # Calculate metrics using the new function
+    metrics_result <- calculate_error_metrics(result, global_seed)
+    
+    if (isTRUE(metrics_result$success)) {
+      # Create unique key for this result
+      metrics_key <- paste(result$enc_type, result$exposure_category, result$cause, sep = "_")
+      metrics_results[[metrics_key]] <- metrics_result$metrics
+    } else {
+      cat("Failed to calculate metrics for:", result$enc_type, result$exposure_category, result$cause, "\n")
+      if (!is.null(metrics_result$error)) {
+        cat("Error:", metrics_result$error, "\n")
+      }
+    }
+  }
+  
+  # Combine all metrics into one dataframe
+  if (length(metrics_results) > 0) {
+    all_metrics <- bind_rows(metrics_results)
+    cat("Successfully calculated metrics for", nrow(all_metrics), "model-dataset combinations\n")
+  } else {
+    cat("No successful metrics calculations\n")
+    all_metrics <- NULL
+  }
+} else {
+  cat("No successful model results to calculate metrics for\n")
+  all_metrics <- NULL
+}
+
+#------------------------------
+# Save final results
 save(all_results, 
-     file = paste0(path_repo, "03_output/all_results_nested_", timestamp, ".RData"))
+     file = paste0(path_onedrive, "02_output/all_results_nested_", mod_ver_suffix, ".RData"))
 
 save(all_combination_results, 
-     file = paste0(path_repo, "03_output/all_results_with_errors_flat_", timestamp, ".RData"))
+     file = paste0(path_onedrive, "02_output/all_results_with_errors_flat_", mod_ver_suffix, ".RData"))
 
-cat("\nParallel processing complete!\n")
-cat("Results saved with timestamp:", timestamp, "\n")
+# Save error metrics if they exist
+if (!is.null(all_metrics) && nrow(all_metrics) > 0) {
+  write.csv(all_metrics, 
+            paste0(path_onedrive, "02_output/performance_metrics_", mod_ver_suffix, ".csv"), 
+            row.names = FALSE)
+  cat("Performance metrics saved successfully\n")
+} else {
+  cat("No performance metrics to save\n")
+}
+
+cat("\nProcessing complete!\n")
+cat("Results saved with timestamp:", mod_ver_suffix, "\n")
