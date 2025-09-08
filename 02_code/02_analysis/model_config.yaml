@@ -1,0 +1,82 @@
+seed: 0112358
+data_version: "dummy"
+# Either specify models_to_run, which gives a cartesian product of 
+# the encounter, exposure, and cause values, or specify models_to_run_flat,
+# which gives an explicit list of models to run. If both are specified,
+# we will fail with an error.
+#
+# Examples:
+# 1. Run all models
+# models_to_run:
+#   encounter_type: ["*"]
+#   exposure_category: ["*"]
+#   cause: ["*"]
+#
+# 2. Run a all respiratory models
+# models_to_run:
+#   encounter_type: ["*"]
+#   exposure_category: ["*"]
+#   cause: ["num_enc_resp"]
+#
+# 3. Run only inpatient evac respiratory and ed smoke cardiovascular
+# models_to_run_flat:
+#   - encounter_type: "IP"
+#     exposure_category: "evac"
+#     cause: "num_enc_resp"
+#   - encounter_type: "ED"
+#     exposure_category: "smoke"
+#     cause: "num_enc_cardiac"
+#
+models_to_run:
+  encounter_type:
+  - "IP"
+  - "ED"
+  exposure_category:
+  - "evac"
+  - "high_smoke"
+  - "mid_smoke"
+  - "none"
+  cause:
+  - "num_enc"
+  - "num_enc_resp"
+  - "num_enc_cardio"
+  - "num_enc_injury"
+  - "num_enc_neuro"
+# models_to_run_flat:
+#   - encounter_type: "IP"
+#     exposure_category: "evac"
+#     cause: "num_enc_resp"
+grid_params:
+  mtry: [3, 10]
+  min_n: [5, 30]
+  tree_depth: [3, 8]
+  learn_rate: [0.01, 0.1]
+  loss_reduction: [-5, 1]
+  stop_iter: [10, 50]
+
+  
+# For later, we want to be able to have different sets of params run
+# for specific models. Here's an idea of how to do that.
+# Create a top level params key.  In params, have a global config
+# and then override configs for specific models. E.g.
+#
+# params:
+#   global:
+#     grid_params:
+#       mtry: [3, 10]
+#       min_n: [5, 30]
+#       tree_depth: [3, 8]
+#       learn_rate: [0.01, 0.1]
+#       loss_reduction: [-5, 1]
+#       stop_iter: [10, 50]
+#   overrides:
+#     - encounter_type: "IP"
+#       exposure_category: "evac"
+#       cause: "num_enc_resp"
+#       grid_params:
+#         mtry: [5, 15]
+#         min_n: [10, 50]
+#         tree_depth: [5, 10]
+#         learn_rate: [0.05, 0.2]
+#         loss_reduction: [-3, 3]
+#         stop_iter: [20, 60]

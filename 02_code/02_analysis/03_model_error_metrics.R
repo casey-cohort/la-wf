@@ -32,7 +32,7 @@ df_preintervention_all <- read_csv(paste0(path_repo, "01_data/02_clean/test_trai
 all_cases_all <-  read_csv(paste0(path_repo, "01_data/02_clean/test_train/df-predict-sf.csv"))
 
 # load model tuning results
-load(paste0(path_repo, "03_output/all_model_tuning_results.RData"))
+load(paste0(path_repo, "03_output/all_model_tuning_results_parallel.RData"))
 
 # an empty list to store results
 results_list <- list()
@@ -57,8 +57,22 @@ for (enc in unique(df_preintervention_all$enc_type)) {
     for (cause in causes) {
       print(cause)
 
-      # Extract the specific results for this combination -----------------------------------------------
+      # Check if this combination exists in results
+      if (is.null(all_results[[enc]]) || 
+          is.null(all_results[[enc]][[exposure]]) || 
+          is.null(all_results[[enc]][[exposure]][[cause]])) {
+        print(paste("SKIPPING: No results found for", enc, exposure, cause))
+        next
+      }
+
+      # Extract the specific results for this combination
       current_results <- all_results[[enc]][[exposure]][[cause]]
+
+      # Check if the results are valid
+      if (is.null(current_results$success) || !current_results$success) {
+        print(paste("SKIPPING: Failed results for", enc, exposure, cause))
+        next
+      }
 
       # Extract individual objects
       splits <- current_results$splits
@@ -67,28 +81,43 @@ for (enc in unique(df_preintervention_all$enc_type)) {
 
       print(paste("Loaded Prophet-XGBoost model for", enc, exposure, cause))
       
-      # RETRY LOGIC -----------------------------------------------
-      max_retries <- 3
+      # IMPROVED RETRY LOGIC -----------------------------------------------
+      max_retries <- 5
       retry_count <- 0
       success <- FALSE
       wflw_fit <- NULL
 
       while (!success && retry_count < max_retries) {
         tryCatch({
-          # Set a different seed for each retry
-          # current_seed <- 0112358 + retry_count * 1000 + which(causes == cause) * 100
-          # set.seed(current_seed)
-          set.seed(0112358) 
+          # Use different seeds and suppress warnings
+          current_seed <- 0112358 + retry_count * 1000 + which(causes == cause) * 100
+          set.seed(current_seed)
           
-          print(paste("  Attempt", retry_count + 1))
+          print(paste("  Attempt", retry_count + 1, "with seed", current_seed))
           
-          wflw_fit <- wflw_phxgb_tune |>
-                    finalize_workflow(select_best(tune_results_phxgb, metric = "rmse")) |>
-                    fit(training(splits))
+          # Suppress XGBoost warnings during fitting
+          suppressWarnings({
+            suppressMessages({
+              wflw_fit <- wflw_phxgb_tune |>
+                        finalize_workflow(select_best(tune_results_phxgb, metric = "rmse")) |>
+                        fit(training(splits))
+            })
+          })
           
-          # If we get here without error, it worked
-          success <- TRUE
-          print(paste("  Success on attempt", retry_count + 1))
+          # Test if the model actually works by making a small prediction
+          test_pred <- suppressWarnings({
+            suppressMessages({
+              predict(wflw_fit, new_data = head(training(splits), 5))
+            })
+          })
+          
+          # If we get here without error and have valid predictions, it worked
+          if (!is.null(test_pred) && nrow(test_pred) > 0 && !any(is.na(test_pred$.pred))) {
+            success <- TRUE
+            print(paste("  Success on attempt", retry_count + 1))
+          } else {
+            stop("Model fitted but predictions are invalid")
+          }
           
         }, error = function(e) {
           retry_count <<- retry_count + 1
@@ -98,6 +127,7 @@ for (enc in unique(df_preintervention_all$enc_type)) {
             print(paste("  Max retries reached, skipping", enc, exposure, cause))
           } else {
             print(paste("  Retrying with different seed..."))
+            Sys.sleep(1)  # Brief pause between retries
           }
         })
       }
@@ -105,70 +135,100 @@ for (enc in unique(df_preintervention_all$enc_type)) {
       # only proceed if we successfully fitted the model
       if (success && !is.null(wflw_fit)) {
         
-        # generate modeltime table ---------------------------------------------------
-        model_tbl <- modeltime_table(wflw_fit)
+        tryCatch({
+          # generate modeltime table with error handling
+          model_tbl <- suppressWarnings({
+            suppressMessages({
+              modeltime_table(wflw_fit)
+            })
+          })
 
-        # training error metrics ---------------------------------------------------
-        training_preds <- model_tbl %>%
-          modeltime_calibrate(new_data = training(splits)) %>%
-          select(.model_desc, .calibration_data) %>%
-          unnest(cols = c(.calibration_data)) %>%
-          mutate(.model_desc = "PROPHETXGB")
+          # training error metrics with error handling
+          training_preds <- suppressWarnings({
+            suppressMessages({
+              model_tbl %>%
+                modeltime_calibrate(new_data = training(splits)) %>%
+                select(.model_desc, .calibration_data) %>%
+                unnest(cols = c(.calibration_data)) %>%
+                mutate(.model_desc = "PROPHETXGB")
+            })
+          })
 
-        df_training_metrics <- training_preds %>%
-          group_by(.model_desc) %>%
-          summarise(
-            mdae = Metrics::mdae(.actual, .prediction),
-            mae = Metrics::mae(.actual, .prediction),
-            rmse = Metrics::rmse(.actual, .prediction),
-            mape = Metrics::mape(.actual, .prediction),
-            rse = Metrics::rse(.actual, .prediction),
-            smape = Metrics::smape(.actual, .prediction),
-            r2 = round(1 - sum((.actual - .prediction)^2) / sum((.actual - mean(.actual))^2), 2),
-            .groups = 'drop'
-          ) %>%
-          mutate(
-            enc_type = enc,
-            exposure_category = exposure,
-            cause = cause,
-            data_type = "training"
-          )
+          # Check if we have valid training predictions
+          if (nrow(training_preds) > 0 && !all(is.na(training_preds$.prediction))) {
+            df_training_metrics <- training_preds %>%
+              group_by(.model_desc) %>%
+              summarise(
+                mdae = Metrics::mdae(.actual, .prediction),
+                mae = Metrics::mae(.actual, .prediction),
+                rmse = Metrics::rmse(.actual, .prediction),
+                mape = Metrics::mape(.actual, .prediction),
+                rse = Metrics::rse(.actual, .prediction),
+                smape = Metrics::smape(.actual, .prediction),
+                r2 = round(1 - sum((.actual - .prediction)^2) / sum((.actual - mean(.actual))^2), 2),
+                .groups = 'drop'
+              ) %>%
+              mutate(
+                enc_type = enc,
+                exposure_category = exposure,
+                cause = cause,
+                data_type = "training"
+              )
 
-        # testing error metrics ----------------------------------------------------
-        test_preds <- model_tbl %>%
-          modeltime_calibrate(new_data = testing(splits)) %>%
-          select(.model_desc, .calibration_data) %>%
-          unnest(cols = c(.calibration_data)) %>%
-          mutate(.model_desc = "PROPHETXGB")
+            # testing error metrics with error handling
+            test_preds <- suppressWarnings({
+              suppressMessages({
+                model_tbl %>%
+                  modeltime_calibrate(new_data = testing(splits)) %>%
+                  select(.model_desc, .calibration_data) %>%
+                  unnest(cols = c(.calibration_data)) %>%
+                  mutate(.model_desc = "PROPHETXGB")
+              })
+            })
 
-        df_testing_metrics <- test_preds %>%
-          group_by(.model_desc) %>%
-          summarise(
-            mdae = Metrics::mdae(.actual, .prediction),
-            mae = Metrics::mae(.actual, .prediction),
-            rmse = Metrics::rmse(.actual, .prediction),
-            mape = Metrics::mape(.actual, .prediction),
-            rse = Metrics::rse(.actual, .prediction),
-            smape = Metrics::smape(.actual, .prediction),
-            r2 = round(1 - sum((.actual - .prediction)^2) / sum((.actual - mean(.actual))^2), 2),
-            .groups = 'drop'
-          ) %>%
-          mutate(
-            enc_type = enc,
-            exposure_category = exposure,
-            cause = cause,
-            data_type = "testing"
-          )
+            # Check if we have valid test predictions
+            if (nrow(test_preds) > 0 && !all(is.na(test_preds$.prediction))) {
+              df_testing_metrics <- test_preds %>%
+                group_by(.model_desc) %>%
+                summarise(
+                  mdae = Metrics::mdae(.actual, .prediction),
+                  mae = Metrics::mae(.actual, .prediction),
+                  rmse = Metrics::rmse(.actual, .prediction),
+                  mape = Metrics::mape(.actual, .prediction),
+                  rse = Metrics::rse(.actual, .prediction),
+                  smape = Metrics::smape(.actual, .prediction),
+                  r2 = round(1 - sum((.actual - .prediction)^2) / sum((.actual - mean(.actual))^2), 2),
+                  .groups = 'drop'
+                ) %>%
+                mutate(
+                  enc_type = enc,
+                  exposure_category = exposure,
+                  cause = cause,
+                  data_type = "testing"
+                )
 
-        print(df_training_metrics)
-        print(df_testing_metrics)
+              print("Training metrics:")
+              print(df_training_metrics)
+              print("Testing metrics:")
+              print(df_testing_metrics)
 
-        # using named list entries to prevent duplicates
-        training_key <- paste(enc, exposure, cause, "training", sep = "_")
-        testing_key <- paste(enc, exposure, cause, "testing", sep = "_")
-        
-        results_list[[training_key]] <- df_training_metrics
-        results_list[[testing_key]] <- df_testing_metrics
+              # using named list entries to prevent duplicates
+              training_key <- paste(enc, exposure, cause, "training", sep = "_")
+              testing_key <- paste(enc, exposure, cause, "testing", sep = "_")
+              
+              results_list[[training_key]] <- df_training_metrics
+              results_list[[testing_key]] <- df_testing_metrics
+
+            } else {
+              print(paste("FAILED: Invalid test predictions for", enc, exposure, cause))
+            }
+          } else {
+            print(paste("FAILED: Invalid training predictions for", enc, exposure, cause))
+          }
+
+        }, error = function(e) {
+          print(paste("FAILED: Error in metrics calculation for", enc, exposure, cause, ":", e$message))
+        })
 
       } else {
         print(paste("FAILED: Could not fit model for", enc, exposure, cause, "after", max_retries, "attempts"))
@@ -181,9 +241,13 @@ for (enc in unique(df_preintervention_all$enc_type)) {
 
 #-------------------------------
 # combine all metrics into one table
-results_train_test_metrics <- bind_rows(results_list)
-print(paste("Final dataset has", nrow(results_train_test_metrics), "rows")) # should always be 80
-
-#-------------------------------
-# save final performance metrics
-write.csv(results_train_test_metrics, paste0(path_repo, "03_output/performance_metrics_parallel.csv"), row.names = FALSE)
+if (length(results_list) > 0) {
+  results_train_test_metrics <- bind_rows(results_list)
+  print(paste("Final dataset has", nrow(results_train_test_metrics), "rows"))
+  
+  # save final performance metrics
+  write.csv(results_train_test_metrics, paste0(path_repo, "03_output/performance_metrics_parallel.csv"), row.names = FALSE)
+  print("Performance metrics saved successfully")
+} else {
+  print("WARNING: No successful results to save")
+}
