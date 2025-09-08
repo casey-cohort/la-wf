@@ -255,8 +255,8 @@ run_tuning <- function(combination, grid_params, global_seed) {
 
 #-------------------------------
 # seed generation function
-# args: global seed, markers (the stuff that makes the model plus the use case)
-# then every time you need a seed for something, use the function to set the seed then run the function 
+# args: global seed, markers (encounter_type string, cause string, exposure_category string, process name string)
+# tip: each time a seed is needed for something, use this function to set the seed, then run the function 
 
 gen_seed <- function(global_seed, markers){
 
