@@ -10,7 +10,7 @@ if (!requireNamespace('pacman', quietly = TRUE)) {install.packages('pacman')}
 pacman::p_load(tidyverse, readr, tidyr, purrr, lubridate, MMWRweek, here, arrow)
 
 # set paths
-source(paste0(getwd(), "/02_code/paths.R"))
+source(paste0(getwd(), "/01_code/paths.R"))
 
 #-------------------------------
 # load data
@@ -98,7 +98,7 @@ df_train_test <- out_df %>%
     mutate(across(where(is.numeric), as.integer)) %>%
     arrange(date)
   
-write_parquet(df_train_test, paste0(path_repo, paste0( "01_data/02_clean/test_train/df-train-test_sf.parquet")))
+write_parquet(df_train_test, paste0(path_onedrive, paste0( "01_data/02_clean/test_train/df-train-test_sf.parquet")))
 
 #-------------------------------
 # create all cases dataset
@@ -119,4 +119,4 @@ df_all_cases <- out_df %>%
   mutate(across(where(is.numeric), as.integer)) %>%
   arrange(date)
 
-write_parquet(df_all_cases, paste0(path_repo, paste0( "01_data/02_clean/test_train/df-predict-sf.parquet")))
+write_parquet(df_all_cases, paste0(path_onedrive, paste0( "01_data/02_clean/test_train/df-predict-sf.parquet")))
