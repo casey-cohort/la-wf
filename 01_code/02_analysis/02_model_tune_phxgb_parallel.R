@@ -14,8 +14,6 @@
 # @date: Dec 16, 2024
 
 # TODO    
-# 1. version data stuff 
-# 2. add config hyperparams to output csv of metrics for easy vetting
 # 3. streamline both scripts and make sure they are doing what we think they are doing. 
   # need to be able to get stable results when we run multiple times.
 
@@ -105,7 +103,10 @@ for (batch in 1:n_batches) {
         exposure_category = .x$exposure_category,
         cause = .x$cause
       )
-      result <- run_tuning(combination, config$grid_params, global_seed)
+      result <- run_tuning(combination,
+                config$grid_params,
+                global_seed,
+                paste0(path_onedrive, "01_data/02_processed/test_train/2025-09-08/"))
       p()
       result
     }, .options = furrr_options(seed = TRUE))
@@ -200,17 +201,47 @@ if (length(successful_results) > 0) {
 }
 
 #------------------------------
+# add config hyperparams to output csv of metrics for easy vetting
+config_expanded <- config$models_to_run_flat %>%
+      map_dfr(~data.frame(
+        enc_type = .x$encounter_type,
+        exposure_category = .x$exposure_category,
+        cause = .x$cause
+      ))
+ 
+# Add hyperparameter ranges as separate columns
+config_expanded$mtry <- paste0("[", config$grid_params$mtry[1], ", ", config$grid_params$mtry[2], "]")
+config_expanded$min_n <- paste0("[", config$grid_params$min_n[1], ", ", config$grid_params$min_n[2], "]")
+config_expanded$tree_depth <- paste0("[", config$grid_params$tree_depth[1], ", ", config$grid_params$tree_depth[2], "]")
+config_expanded$learn_rate <- paste0("[", config$grid_params$learn_rate[1], ", ", config$grid_params$learn_rate[2], "]")
+config_expanded$loss_reduction <- paste0("[", config$grid_params$loss_reduction[1], ", ", config$grid_params$loss_reduction[2], "]")
+config_expanded$stop_iter <- paste0("[", config$grid_params$stop_iter[1], ", ", config$grid_params$stop_iter[2], "]")
+
+if (!is.null(all_metrics) && nrow(all_metrics) > 0) {
+  all_metrics <- all_metrics %>%
+    left_join(config_expanded, by = c("enc_type", "exposure_category", "cause"))
+}
+
+#------------------------------
+# lastly, generate model description
+all_metrics <- all_metrics %>% mutate(model_description = "insert changes since last run here")
+
+# and order cols 
+all_metrics <- all_metrics %>%
+  select(enc_type, exposure_category, cause, model_description, mtry, min_n, tree_depth, learn_rate, loss_reduction, stop_iter, everything())
+
+#------------------------------
 # Save final results
 save(all_results, 
-     file = paste0(path_onedrive, "02_output/all_results_nested_", mod_ver_suffix, ".RData"))
+     file = paste0(path_onedrive, "02_output/model_run_", mod_ver_suffix, "/all_results_nested_", mod_ver_suffix, ".RData"))
 
 save(all_combination_results, 
-     file = paste0(path_onedrive, "02_output/all_results_with_errors_flat_", mod_ver_suffix, ".RData"))
+     file = paste0(path_onedrive, "02_output/model_run_", mod_ver_suffix, "/all_results_with_errors_flat_", mod_ver_suffix, ".RData"))
 
 # Save error metrics if they exist
 if (!is.null(all_metrics) && nrow(all_metrics) > 0) {
   write.csv(all_metrics, 
-            paste0(path_onedrive, "02_output/performance_metrics_", mod_ver_suffix, ".csv"), 
+            paste0(path_onedrive, "02_output/model_run_", mod_ver_suffix, "/performance_metrics_", mod_ver_suffix, ".csv"), 
             row.names = FALSE)
   cat("Performance metrics saved successfully\n")
 } else {
