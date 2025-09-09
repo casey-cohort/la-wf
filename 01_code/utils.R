@@ -129,7 +129,7 @@ write_config <- function(config, file_path) {
 #------------------------------
 # run tuning function to process a single combination with error handling
 
-run_tuning <- function(combination, grid_params, global_seed) {
+run_tuning <- function(combination, grid_params, global_seed, test_train_path) {
 
   enc <- combination$encounter_type
   exposure <- combination$exposure_category
@@ -141,7 +141,7 @@ run_tuning <- function(combination, grid_params, global_seed) {
     # load and subset data for this enc_type and exposure_category------------------------------
     # load and subset to enc and exposure on load
     df_train_test_encounter <- open_dataset(
-        paste0(path_onedrive, "01_data/02_clean/test_train/df-train-test_sf.parquet")) %>% 
+        paste0(test_train_path, "df-train-test_sf.parquet")) %>% 
         filter(
           exposure_category == !!exposure & enc_type == !!enc
         ) %>% 

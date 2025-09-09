@@ -14,7 +14,7 @@ source(paste0(getwd(), "/01_code/paths.R"))
 
 #-------------------------------
 # load data
-df_temp <- read_csv(paste0(path_onedrive, "01_data/01_raw/ed_ipt_dat/08082025/ENC_EXP_DAILY_08082025.csv")) %>% 
+df_temp <- read_csv(paste0(path_onedrive, "01_data/01_raw/ed_ipt_dat/2025-08-08/ENC_EXP_DAILY.csv")) %>% 
    # clean names so there are no spaces -- this will help since we name datasets based on exp cat
    # if we change this system, we can change this! 
    mutate(exposure_category = str_replace_all(exposure_category, ",.*", ""),
@@ -22,10 +22,10 @@ df_temp <- read_csv(paste0(path_onedrive, "01_data/01_raw/ed_ipt_dat/08082025/EN
          exposure_category = ifelse(exposure_category == "no_smoke", "none", exposure_category))
 
 # resp covs
-resp_virus<- read_csv(paste0(path_onedrive, "01_data/02_processed/wastewater_resp_illness_data/resp-virus-dat_all.csv"))
+resp_virus<- read_csv(paste0(path_onedrive, "01_data/02_processed/wastewater_resp_illness_data/2025-09-02resp-virus-dat_all.csv"))
 
 # add meterological covariates
-cov <- read_csv(paste0(path_onedrive, "01_data/02_processed/gridmet/gridmet_cov_exp_level.csv")) %>%
+cov <- read_csv(paste0(path_onedrive, "01_data/02_processed/gridmet/2025-09-02/gridmet_cov_exp_level.csv")) %>%
   mutate(encounter_dt = date,
          exposure_category = ifelse(exp_level == "high", "high_smoke", 
                             ifelse(exp_level == "mid", "mid_smoke", exp_level))) %>%
@@ -119,4 +119,5 @@ df_all_cases <- out_df %>%
   mutate(across(where(is.numeric), as.integer)) %>%
   arrange(date)
 
-write_parquet(df_all_cases, paste0(path_onedrive, paste0( "01_data/02_clean/test_train/df-predict-sf.parquet")))
+dir.create(paste0(path_onedrive, "01_data/02_processed/test_train/", Sys.Date(), "/"), showWarnings = FALSE)
+write_parquet(df_all_cases, paste0(path_onedrive, "01_data/02_processed/test_train/", Sys.Date(), "/df-predict-sf.parquet"))
