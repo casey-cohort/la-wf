@@ -5,7 +5,8 @@
 # this code preps all data for the interrupted time series analysis
 
 #-------------------------------
-# load packages
+# setup
+rm(list=ls())
 if (!requireNamespace('pacman', quietly = TRUE)) {install.packages('pacman')}
 pacman::p_load(tidyverse, readr, tidyr, purrr, lubridate, MMWRweek, here, arrow)
 
@@ -14,22 +15,21 @@ source(paste0(getwd(), "/01_code/paths.R"))
 
 #-------------------------------
 # load data
-df_temp <- read_csv(paste0(path_onedrive, "01_data/01_raw/ed_ipt_dat/2025-08-08/ENC_EXP_DAILY.csv")) %>% 
-   # clean names so there are no spaces -- this will help since we name datasets based on exp cat
-   # if we change this system, we can change this! 
+df_temp <- read_csv(paste0(path_onedrive, "01_data/01_raw/ed_ipt_dat/2025-08-08/ENC_EXP_DAILY_08082025.csv")) %>% 
+   # clean names so there are no spaces
    mutate(exposure_category = str_replace_all(exposure_category, ",.*", ""),
          exposure_category = str_replace_all(exposure_category, " ", "_"),
          exposure_category = ifelse(exposure_category == "no_smoke", "none", exposure_category))
 
 # resp covs
-resp_virus<- read_csv(paste0(path_onedrive, "01_data/02_processed/wastewater_resp_illness_data/2025-09-02resp-virus-dat_all.csv"))
+resp_virus<- read_csv(paste0(path_onedrive, "01_data/02_processed/wastewater_resp_illness_data/2025-09-02/resp-virus-dat_all.csv"))
 
 # add meterological covariates
-cov <- read_csv(paste0(path_onedrive, "01_data/02_processed/gridmet/2025-09-02/gridmet_cov_exp_level.csv")) %>%
+cov <- read_csv(paste0(path_onedrive, "01_data/02_processed/gridmet/2025-09-02/gridmet_cov_exposure_category.csv")) %>%
   mutate(encounter_dt = date,
-         exposure_category = ifelse(exp_level == "high", "high_smoke", 
-                            ifelse(exp_level == "mid", "mid_smoke", exp_level))) %>%
-  select(-date, -exp_level, -`...1`)
+         exposure_category = ifelse(exposure_category == "high", "high_smoke", 
+                            ifelse(exposure_category == "mid", "mid_smoke", exposure_category))) %>%
+  select(-date)
 
 #-------------------------------
 # restructure and merge in covariates
@@ -97,8 +97,10 @@ df_train_test <- out_df %>%
     select(-c(`influenza-a`, `influenza-b`, `sars-cov2`)) %>%
     mutate(across(where(is.numeric), as.integer)) %>%
     arrange(date)
-  
-write_parquet(df_train_test, paste0(path_onedrive, paste0( "01_data/02_clean/test_train/df-train-test_sf.parquet")))
+
+
+dir.create(dirname(paste0(path_onedrive, "01_data/02_processed/train_test/", Sys.Date())), recursive = TRUE, showWarnings = FALSE)
+write_parquet(df_train_test, paste0(path_onedrive, paste0( "01_data/02_processed/train_test/", Sys.Date(), "/df-train-test_sf.parquet")))
 
 #-------------------------------
 # create all cases dataset
@@ -119,5 +121,5 @@ df_all_cases <- out_df %>%
   mutate(across(where(is.numeric), as.integer)) %>%
   arrange(date)
 
-dir.create(paste0(path_onedrive, "01_data/02_processed/test_train/", Sys.Date(), "/"), showWarnings = FALSE)
-write_parquet(df_all_cases, paste0(path_onedrive, "01_data/02_processed/test_train/", Sys.Date(), "/df-predict-sf.parquet"))
+# dont need to recreate bc it goes in the same filepath as the test train data! 
+write_parquet(df_all_cases, paste0(path_onedrive, "01_data/02_processed/train_test/", Sys.Date(), "/df-predict-sf.parquet"))

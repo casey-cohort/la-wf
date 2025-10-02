@@ -54,7 +54,14 @@ grid_params:
   loss_reduction: [-5, 1]
   stop_iter: [10, 50]
 
-  
+train_test_params: 
+  assess_split: "75 days"
+  assess_cv: "40 days"
+  skip_cv: "40 days"
+  slice_limit_cv: 8
+# can give a list of combinations so we can try many things -- so maybe increments of 5 and all combos. 
+
+
 # For later, we want to be able to have different sets of params run
 # for specific models. Here's an idea of how to do that.
 # Create a top level params key.  In params, have a global config
