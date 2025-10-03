@@ -8,35 +8,35 @@
 
 #-------------------------------
 # setup
-# require(data.table)
+rm(list=ls())
 require(dplyr)
 require(tidyverse)
 
 # set paths
-source(paste0(getwd(), "/02_code/paths.R"))
+source(paste0(getwd(), "/01_code/paths.R"))
 
 #-------------------------------
 # exp data
 # read in gridmet data from gee 
-gridmet_dat <- read_csv(paste0(path_onedrive, "01_data/01_raw/gridmet/gridmet-ct-LA-wf_aug2025.csv"))
+gridmet_dat <- read_csv(paste0(path_onedrive, "01_data/01_raw/gridmet/2025-09-02/gridmet-ct-LA-wf.csv"))
 gridmet_dat_clean <- gridmet_dat %>%
   mutate(date = as.Date(sub("_.*", "", `system:index`), format = "%Y%m%d")) %>%
   select(-`system:index`) %>%
   mutate(geoid10 = as.numeric(geoid10))
   
 # read in exposure data
-pm_exp_data <- read_csv(paste0(path_repo, "01_data/02_clean/exposed_cts_pm.csv")) %>%
-  rename(exp_level = exposed_pm) %>%
-  select(geoid, exp_level)
-evac_exp_data <- read_csv(paste0(path_repo, "01_data/02_clean/exposed_cts_evac.csv")) %>%
-  # recode so that we have an exp_level called "evac" and then only include those tracts
+pm_exp_data <- read_csv(paste0(path_onedrive, "01_data/02_processed/exposed_cts_pm.csv")) %>%
+  rename(exposure_category = exposed_pm) %>%
+  select(geoid, exposure_category)
+evac_exp_data <- read_csv(paste0(path_onedrive, "01_data/02_processed/exposed_cts_evac.csv")) %>%
+  # recode so that we have an exposure_category called "evac" and then only include those tracts
   # the other tracts will be added using the smoke exposure data 
   # we dont need them here bc `not exposed` will come from smoke data
   # evac just overrides any smoke classification
   mutate(exposed_evac = ifelse(exposed_evac == 1, "evac", "no_evac")) %>% 
-  rename(exp_level = exposed_evac) %>%
-  filter(exp_level == "evac") %>%
-  select(geoid, exp_level)
+  rename(exposure_category = exposed_evac) %>%
+  filter(exposure_category == "evac") %>%
+  select(geoid, exposure_category)
 
 # remove any cts from pm_exp_data that are also in evac_exp_data
 pm_exp_data <- pm_exp_data %>%
@@ -56,12 +56,12 @@ data_with_gridmet <- data %>%
 
 # collapse over ct and calculate mean gridmet values by exposure level/date
 grouped_gridmet <- data_with_gridmet  %>%
-  filter(!is.na(exp_level)) %>%
-  group_by(date, exp_level) %>%
+  filter(!is.na(exposure_category)) %>%
+  group_by(date, exposure_category) %>%
   summarize(across(where(is.numeric), mean, na.rm = TRUE), .groups = "drop") %>%
   select(-geoid10)
 
 #-------------------------------
 # write
-write.csv(grouped_gridmet,paste0(path_onedrive, "01_data/02_processed/gridmet/gridmet_cov_exp_level.csv"))
+write_csv(grouped_gridmet, paste0(path_onedrive, "01_data/02_processed/gridmet/2025-09-02/gridmet_cov_exposure_category.csv"))
 

@@ -13,10 +13,6 @@
 # @description: This script configures, tunes, and fits a Prophet-XGBoost model to the aggregated data
 # @date: Dec 16, 2024
 
-# TODO    
-# 3. streamline both scripts and make sure they are doing what we think they are doing. 
-  # need to be able to get stable results when we run multiple times.
-
 #-------------------------------
 # setup
 rm(list = ls())
@@ -36,7 +32,7 @@ mod_ver_suffix <- paste0(Sys.Date(), ".", ver)
 # read config 
 config <- read_config(paste0(path_repo, "01_code/02_analysis/model_config.yaml"))
 
-# write config
+# write this ver of config back out
 write_config(config, paste0(path_onedrive, "02_output/", folder_name, "model_config_", mod_ver_suffix, ".yaml"))
 
 # ensure consistent numeric precision 
@@ -45,6 +41,9 @@ options(scipen = 999)
 
 # set global seed for arg to tuning function
 global_seed <- 0112358
+
+# train test data to use -- datasets are in dated folders
+train_test_date <- max(list.dirs(paste0(path_onedrive, "01_data/02_processed/train_test/"), full.names = FALSE, recursive = FALSE))
 
 #------------------------------
 # Set up parallel processing
@@ -60,6 +59,21 @@ tryCatch({
 }, error = function(e) {
   cat("Memory info not available\n")
 })
+
+#------------------------------
+# TEST MODE - Uncomment to run on subset for testing
+# Comment out when running full batch
+# test_combinations <- data.frame(
+#   encounter_type = c("ED", "IP"),
+#   exposure_category = c("high_smoke", "high_smoke"),
+#   cause = c("num_enc_resp", "num_enc_resp")
+# )
+# config$models_to_run_flat <- map(1:nrow(test_combinations), ~list(
+#   encounter_type = test_combinations$encounter_type[.x],
+#   exposure_category = test_combinations$exposure_category[.x],
+#   cause = test_combinations$cause[.x]
+# ))
+# cat("*** RUNNING IN TEST MODE ***\n")
 
 #------------------------------
 # Prepare combinations and estimate runtime
@@ -105,8 +119,9 @@ for (batch in 1:n_batches) {
       )
       result <- run_tuning(combination,
                 config$grid_params,
+                config$train_test_params,
                 global_seed,
-                paste0(path_onedrive, "01_data/02_processed/test_train/2025-09-08/"))
+                paste0(path_onedrive, "01_data/02_processed/train_test/", train_test_date, "/"))
       p()
       result
     }, .options = furrr_options(seed = TRUE))
@@ -127,11 +142,11 @@ for (batch in 1:n_batches) {
 }
 
 #------------------------------
-# Close down parallel processing
+# close down parallel processing
 plan(sequential)
 
 #------------------------------
-# Check for errors and summarize results
+# check for errors and summarize results
 errors <- sapply(all_combination_results, function(x) !is.null(x$error) || !isTRUE(x$success))
 cat("\nSUMMARY:\n")
 cat("Total combinations processed:", length(all_combination_results), "\n")
@@ -141,10 +156,19 @@ cat("Failed combinations:", sum(errors), "\n")
 if (sum(errors) > 0) {
   error_details <- all_combination_results[errors]
   cat("Error details saved for debugging\n")
+  
+  # Print first few error details to help debug
+  cat("\n=== ERROR DETAILS ===\n")
+  for (i in seq_along(error_details)) {
+    error <- error_details[[i]]
+    cat("Error", i, ":", error$enc_type, error$exposure_category, error$cause, "\n")
+    cat("Message:", error$error, "\n")
+    cat("---\n")
+  }
 }
 
 #------------------------------
-# Organize results into nested structure
+# organize results into nested structure
 all_results <- list()
 for (i in seq_along(all_combination_results)) {
   result <- all_combination_results[[i]]
@@ -161,10 +185,10 @@ for (i in seq_along(all_combination_results)) {
 }
 
 #------------------------------
-# Calculate error metrics for successful models
+# performance metrics for successful models
 cat("\n=== Calculating error metrics ===\n")
 
-# Extract only successful results for metrics calculation
+# filter to only successful results for metrics calculation
 successful_results <- all_combination_results[!errors]
 metrics_results <- list()
 
@@ -172,11 +196,11 @@ if (length(successful_results) > 0) {
   for (i in seq_along(successful_results)) {
     result <- successful_results[[i]]
     
-    # Calculate metrics using the new function
+    # calc metrics using the new function
     metrics_result <- calculate_error_metrics(result, global_seed)
     
     if (isTRUE(metrics_result$success)) {
-      # Create unique key for this result
+      # create unique key for this result
       metrics_key <- paste(result$enc_type, result$exposure_category, result$cause, sep = "_")
       metrics_results[[metrics_key]] <- metrics_result$metrics
     } else {
@@ -187,7 +211,7 @@ if (length(successful_results) > 0) {
     }
   }
   
-  # Combine all metrics into one dataframe
+  # concat all metrics into one dataframe
   if (length(metrics_results) > 0) {
     all_metrics <- bind_rows(metrics_results)
     cat("Successfully calculated metrics for", nrow(all_metrics), "model-dataset combinations\n")
@@ -201,6 +225,31 @@ if (length(successful_results) > 0) {
 }
 
 #------------------------------
+# extract best parameters from successful model results
+best_params_df <- list()
+
+for (i in seq_along(successful_results)) {
+  result <- successful_results[[i]]
+  if (!is.null(result$best_params)) {
+    best_params_row <- result$best_params %>%
+      select(mtry, min_n, tree_depth, learn_rate, loss_reduction, stop_iter) %>%
+      mutate(
+        enc_type = result$enc_type,
+        exposure_category = result$exposure_category,
+        cause = result$cause
+      )
+    best_params_df[[i]] <- best_params_row
+  }
+}
+
+# combine all best params into one dataframe
+if (length(best_params_df) > 0) {
+  all_best_params <- bind_rows(best_params_df)
+} else {
+  all_best_params <- NULL
+}
+
+#------------------------------
 # add config hyperparams to output csv of metrics for easy vetting
 config_expanded <- config$models_to_run_flat %>%
       map_dfr(~data.frame(
@@ -208,37 +257,59 @@ config_expanded <- config$models_to_run_flat %>%
         exposure_category = .x$exposure_category,
         cause = .x$cause
       ))
- 
-# Add hyperparameter ranges as separate columns
-config_expanded$mtry <- paste0("[", config$grid_params$mtry[1], ", ", config$grid_params$mtry[2], "]")
-config_expanded$min_n <- paste0("[", config$grid_params$min_n[1], ", ", config$grid_params$min_n[2], "]")
-config_expanded$tree_depth <- paste0("[", config$grid_params$tree_depth[1], ", ", config$grid_params$tree_depth[2], "]")
-config_expanded$learn_rate <- paste0("[", config$grid_params$learn_rate[1], ", ", config$grid_params$learn_rate[2], "]")
-config_expanded$loss_reduction <- paste0("[", config$grid_params$loss_reduction[1], ", ", config$grid_params$loss_reduction[2], "]")
-config_expanded$stop_iter <- paste0("[", config$grid_params$stop_iter[1], ", ", config$grid_params$stop_iter[2], "]")
+
+config_expanded$mtry_range <- paste0("[", config$grid_params$mtry[1], ", ", config$grid_params$mtry[2], "]")
+config_expanded$min_n_range <- paste0("[", config$grid_params$min_n[1], ", ", config$grid_params$min_n[2], "]")
+config_expanded$tree_depth_range <- paste0("[", config$grid_params$tree_depth[1], ", ", config$grid_params$tree_depth[2], "]")
+config_expanded$learn_rate_range <- paste0("[", config$grid_params$learn_rate[1], ", ", config$grid_params$learn_rate[2], "]")
+config_expanded$loss_reduction_range <- paste0("[", config$grid_params$loss_reduction[1], ", ", config$grid_params$loss_reduction[2], "]")
+config_expanded$stop_iter_range <- paste0("[", config$grid_params$stop_iter[1], ", ", config$grid_params$stop_iter[2], "]")
+config_expanded$assess_split <- config$train_test_params$assess_split
+config_expanded$assess_cv <- config$train_test_params$assess_cv
+config_expanded$skip_cv <- config$train_test_params$skip_cv
+config_expanded$slice_limit_cv <- config$train_test_params$slice_limit_cv
 
 if (!is.null(all_metrics) && nrow(all_metrics) > 0) {
+  # join with config params first
   all_metrics <- all_metrics %>%
     left_join(config_expanded, by = c("enc_type", "exposure_category", "cause"))
+  
+  # then join with best params if they exist
+  if (!is.null(all_best_params) && nrow(all_best_params) > 0) {
+    all_metrics <- all_metrics %>%
+      left_join(all_best_params, by = c("enc_type", "exposure_category", "cause"))
+  }
 }
 
 #------------------------------
-# lastly, generate model description
-all_metrics <- all_metrics %>% mutate(model_description = "insert changes since last run here")
+# lastly, generate model description and order columns
+if (!is.null(all_metrics) && nrow(all_metrics) > 0) {
+  all_metrics <- all_metrics %>% mutate(model_description = "insert changes since last run here")
 
-# and order cols 
-all_metrics <- all_metrics %>%
-  select(enc_type, exposure_category, cause, model_description, mtry, min_n, tree_depth, learn_rate, loss_reduction, stop_iter, everything())
+  # and order cols 
+  all_metrics <- all_metrics %>%
+    select(enc_type, exposure_category, cause, model_description, 
+           # hyperparameter tuning ranges and their corresponding best values
+           mtry_range, mtry,
+           min_n_range, min_n,
+           tree_depth_range, tree_depth,
+           learn_rate_range, learn_rate,
+           loss_reduction_range, loss_reduction,
+           stop_iter_range, stop_iter,
+           # assess/skip parameters
+           assess_split, assess_cv, skip_cv, slice_limit_cv, 
+           everything())
+}
 
 #------------------------------
-# Save final results
+# save final results
 save(all_results, 
      file = paste0(path_onedrive, "02_output/model_run_", mod_ver_suffix, "/all_results_nested_", mod_ver_suffix, ".RData"))
 
 save(all_combination_results, 
      file = paste0(path_onedrive, "02_output/model_run_", mod_ver_suffix, "/all_results_with_errors_flat_", mod_ver_suffix, ".RData"))
 
-# Save error metrics if they exist
+# save performance metrics
 if (!is.null(all_metrics) && nrow(all_metrics) > 0) {
   write.csv(all_metrics, 
             paste0(path_onedrive, "02_output/model_run_", mod_ver_suffix, "/performance_metrics_", mod_ver_suffix, ".csv"), 

@@ -15,6 +15,26 @@
 
 
 #-------------------------------
+# gen seed
+#-------------------------------
+# args: global seed, markers (encounter_type string, cause string, exposure_category string, process name string)
+# tip: each time a seed is needed for something, use this function to set the seed, then run the function 
+
+gen_seed <- function(global_seed, markers){
+
+  # combine the markers into a single string
+  combined_string <- paste(markers, collapse = "_")
+
+  # generate a hash of the combined string with the global seed
+  seed_hash <- digest::digest(combined_string, algo = "xxhash32", seed = global_seed)
+
+  # convert the hash to an integer seed
+  seed_integer <- as.integer(paste0("0x", substr(seed_hash, 1, 6)), 16)
+  
+  return(seed_integer)
+}
+
+#-------------------------------
 # gen ver number 
 #-------------------------------
 # look for if today's date exists in output folder. if so, look at version number after the date, and increment it by 1. if not, start at v001. always pad with 0's such that the ver number is 3 digits.
@@ -52,7 +72,6 @@ gen_ver_number <- function(path) {
 
 #-------------------------------
 # config functions
-
 # TODO: use dataclass package at some point for validations 
 # this will allow us to load via yaml and validate it through dataclass which will confirm all the fields are valid and we return the config obj. 
 
@@ -75,13 +94,15 @@ read_config <- function(file_path) {
     stop("Error: Must provide one of models_to_run or models_to_run_flat in the config file.")
   }
 
-  ## if models_to_run is provided, convert it to models_to_run_flat and delete models_to_run from config
-    # Extract the vectors from the nested structure
+  # if models_to_run is provided -------------------------------
+  # convert it to models_to_run_flat and delete models_to_run from config
+    # this ensures that we always have models_to_run_flat to work with downstream  
+    # step 1: extract the vectors from the nested structure
     encounter_types <- config$models_to_run$encounter_type
     exposure_categories <- config$models_to_run$exposure_category
     causes <- config$models_to_run$cause
     
-    # Create all combinations using expand.grid
+    # step 2: reate all combinations using expand.grid
     combinations <- expand.grid(
       encounter_type = encounter_types,
       exposure_category = exposure_categories,
@@ -89,7 +110,7 @@ read_config <- function(file_path) {
       stringsAsFactors = FALSE
     )
     
-    # Convert to list of lists with clean character values
+    # step 3: convert to list of lists with clean character values
     models_to_run_flat <- lapply(1:nrow(combinations), function(i) {
       list(
         encounter_type = as.character(combinations$encounter_type[i]),
@@ -98,20 +119,20 @@ read_config <- function(file_path) {
       )
     })
     
-    # Clean up the original models_to_run if you want
+    # if we started with models_to_run, remove it from config
     config$models_to_run <- NULL
     
-    # Assign the flattened structure
+    # assign the models_to_run to models_to_run_flat in config
     config$models_to_run_flat <- models_to_run_flat
 
-  ## Make sure everything in models_to_run_flat is unique
+  # Make sure everything in models_to_run_flat is unique -------------------------------
   if(
     length(config$models_to_run_flat) == 
     length(unique(config$models_to_run_flat))
     ){
       return(config)
     } else {
-      stop("Error: models_to_run_flat contains duplicate entries.")
+      stop("Error: you have specified duplicate model combinations! Please make sure all encounter_type -- exposure_category -- cause combinations are unique.")
     }
 
 }
@@ -127,9 +148,9 @@ write_config <- function(config, file_path) {
 #-------------------------------
 # model tuning function
 #------------------------------
-# run tuning function to process a single combination with error handling
+# run tuning function to process a single combination
 
-run_tuning <- function(combination, grid_params, global_seed, test_train_path) {
+run_tuning <- function(combination, grid_params, train_test_params, global_seed, train_test_path) {
 
   enc <- combination$encounter_type
   exposure <- combination$exposure_category
@@ -141,7 +162,7 @@ run_tuning <- function(combination, grid_params, global_seed, test_train_path) {
     # load and subset data for this enc_type and exposure_category------------------------------
     # load and subset to enc and exposure on load
     df_train_test_encounter <- open_dataset(
-        paste0(test_train_path, "df-train-test_sf.parquet")) %>% 
+        paste0(train_test_path, "df-train-test_sf.parquet")) %>% 
         filter(
           exposure_category == !!exposure & enc_type == !!enc
         ) %>% 
@@ -158,8 +179,8 @@ run_tuning <- function(combination, grid_params, global_seed, test_train_path) {
     splits <- df_train_test_encounter |>
       ungroup() |>
       time_series_split(
-        assess = "75 days",
-        skip = "75 days",
+        assess = train_test_params$assess_split,
+        # skip = "75 days", no skip needed for splits
         cumulative = TRUE,
         date_var = date
       ) # this does not need a seed 
@@ -167,8 +188,9 @@ run_tuning <- function(combination, grid_params, global_seed, test_train_path) {
     ## resample data------------------------------
     resamples_kfold <- training(splits) |> 
       time_series_cv(
-        assess = "40 days",
-        slice_limit = 8,        
+        assess = train_test_params$assess_cv,
+        skip = train_test_params$skip_cv,
+        slice_limit = train_test_params$slice_limit_cv,        
         cumulative = TRUE,
         verbose = FALSE
       ) # this does not need a seed 
@@ -248,7 +270,7 @@ run_tuning <- function(combination, grid_params, global_seed, test_train_path) {
     set.seed(tune_results_phxgb_seed)
     suppressWarnings({ suppressMessages({
       tune_results_phxgb <- wflw_phxgb_tune |>
-        tune_grid(
+        tune_grid( # try: tune_bayes
           resamples = resamples_kfold,
           grid = grid_phxgb_tune,
           control = control_grid(
@@ -297,7 +319,7 @@ run_tuning <- function(combination, grid_params, global_seed, test_train_path) {
 # Error metrics function
 #-------------------------------
 # helper function to calculate metrics for a dataset
-calc_metrics <- function(data_type, dataset, model_table) {
+calc_metrics <- function(data_type, dataset, model_table, enc_type_val, exposure_category_val, cause_val) {
       tryCatch({
         preds <- suppressWarnings({
           suppressMessages({
@@ -323,9 +345,9 @@ calc_metrics <- function(data_type, dataset, model_table) {
               .groups = 'drop'
             ) %>%
             mutate(
-              enc_type = enc,
-              exposure_category = exposure,
-              cause = cause,
+              enc_type = enc_type_val,
+              exposure_category = exposure_category_val,
+              cause = cause_val,
               data_type = data_type
             )
           return(metrics_df)
@@ -348,12 +370,12 @@ calculate_error_metrics <- function(result, global_seed) {
   tryCatch({
     cat("Calculating error metrics for:", enc, exposure, cause, "\n")
     
-    # Extract objects from result
-    splits <- result$splits
+    # extract objects from result
     wflw_phxgb_tune <- result$wflw_phxgb_tune
     tune_results_phxgb <- result$tune_results_phxgb
+    splits <- result$splits
     
-    # Fit the final model with retry logic
+    # fit the final model with retry logic because this solves the error where the same number isn't seen as the same
     max_retries <- 5
     retry_count <- 0
     success <- FALSE
@@ -400,7 +422,7 @@ calculate_error_metrics <- function(result, global_seed) {
       return(list(error = "Could not fit final model", success = FALSE))
     }
 
-    # Generate modeltime table and calculate metrics with better error handling
+    # Generate modeltime table and calculate metrics
     model_tbl <- tryCatch({
       suppressWarnings({
         suppressMessages({
@@ -416,9 +438,9 @@ calculate_error_metrics <- function(result, global_seed) {
       return(list(error = "Could not create modeltime table", success = FALSE))
     }
 
-    # Calculate training and testing metrics - pass model_tbl as parameter
-    training_metrics <- calc_metrics("training", training(splits), model_tbl)
-    testing_metrics <- calc_metrics("testing", testing(splits), model_tbl)
+    # Calculate training and testing metrics - pass model_tbl and combination parameters
+    training_metrics <- calc_metrics("training", training(splits), model_tbl, enc, exposure, cause)
+    testing_metrics <- calc_metrics("testing", testing(splits), model_tbl, enc, exposure, cause)
     
     # Combine results
     all_metrics <- bind_rows(training_metrics, testing_metrics)
@@ -439,24 +461,3 @@ calculate_error_metrics <- function(result, global_seed) {
     ))
   })
 }
-
-#-------------------------------
-# seed generation function
-#-------------------------------
-# args: global seed, markers (encounter_type string, cause string, exposure_category string, process name string)
-# tip: each time a seed is needed for something, use this function to set the seed, then run the function 
-
-gen_seed <- function(global_seed, markers){
-
-  # combine the markers into a single string
-  combined_string <- paste(markers, collapse = "_")
-
-  # generate a hash of the combined string with the global seed
-  seed_hash <- digest::digest(combined_string, algo = "xxhash32", seed = global_seed)
-
-  # convert the hash to an integer seed
-  seed_integer <- as.integer(paste0("0x", substr(seed_hash, 1, 6)), 16)
-  
-  return(seed_integer)
-}
-
