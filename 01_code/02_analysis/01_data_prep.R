@@ -99,7 +99,7 @@ df_train_test <- out_df %>%
     arrange(date)
 
 
-dir.create(dirname(paste0(path_onedrive, "01_data/02_processed/train_test/", Sys.Date())), recursive = TRUE, showWarnings = FALSE)
+dir.create(paste0(path_onedrive, "01_data/02_processed/train_test/", Sys.Date()), recursive = TRUE, showWarnings = FALSE)
 write_parquet(df_train_test, paste0(path_onedrive, paste0( "01_data/02_processed/train_test/", Sys.Date(), "/df-train-test_sf.parquet")))
 
 #-------------------------------
@@ -111,7 +111,7 @@ df_all_cases <- out_df %>%
     year = year(date),
     postjan7 = ifelse(month_day < "01-07" | month_day > "01-21", 0, 1)
   ) %>%
-  filter(!(month_day > "01-06" & year == 2025)) %>%
+  # filter(!(month_day > "01-06" & year == 2025)) %>%
   select(-c('encounter_dt')) %>%
   mutate(influenza.a = `influenza-a` * 10000000,
             influenza.b = `influenza-b` * 10000000,
