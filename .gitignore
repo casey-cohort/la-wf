@@ -56,3 +56,7 @@ rsconnect/
 
 
 .DS_Store
+
+# Dev files and folders
+sandbox/
+paths.R

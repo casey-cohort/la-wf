@@ -1,0 +1,168 @@
+# Understanding time series cross-validation
+
+# Load libraries ----
+```{r setup, include=FALSE}
+library(dplyr)
+library(lubridate)
+library(here)
+library(timetk)
+library(tidymodels)
+```
+
+# Create a simple data set with all dates between 2022-01-01 and 2022-12-31
+## Assume that the event happened on 1st Jan 2023. And the data from 01-01-2023 is a true hold out.
+```{r}
+set.seed(0112358)
+date_range <- seq(as.Date("2022-01-01"), as.Date("2022-12-31"), by = "day")
+dummy_data_simple <- data.frame(date = date_range, hosp_resp = sample(250:525, length(date_range), replace = TRUE))
+head(dummy_data_simple)
+```
+
+# Display data summary
+```{r}
+cat("Total observations:", nrow(dummy_data_simple), "\n")
+cat("Date range:", as.character(min(dummy_data_simple$date)), "to", as.character(max(dummy_data_simple$date)), "\n")
+cat("Hospital respiratory range:", min(dummy_data_simple$hosp_resp), "to", max(dummy_data_simple$hosp_resp), "\n\n")
+```
+
+# Step-0: Split data into training and testing
+```{r, include=FALSE}
+splits_demo <- dummy_data_simple |>
+  time_series_split(
+    assess = "31 days",
+    cumulative = TRUE, # Always true, when using a single slice
+    date_var = date
+  )
+head(training(splits_demo))
+# df_training <- training(splits_demo)
+# df_testing <- testing(splits_demo)
+range(training(splits_demo)$date)
+range(testing(splits_demo)$date)
+```
+
+# Understanding the parameters of the time_series_cv function using multiple scenarios
+## assess: the length of the assessment (validation) period
+## initial: the initial training period
+## slice_limit: the maximum number of slices to create
+## cumulative: whether to use an expanding window
+
+## Function to get the dates of the training and validation periods for each fold
+```{r, include=FALSE}
+# Function to get CV dates
+get_cv_dates <- function(resampling_object) {
+  if (!inherits(resampling_object, "time_series_cv")) {
+    stop("Input must be a time_series_cv object")
+  }
+  
+  fold_info <- resampling_object$splits |>
+    map_dfr(function(split) {
+      train_data <- analysis(split)
+      val_data <- assessment(split)
+      
+      train_dates <- train_data |>
+        summarise(
+          train_start = min(date),
+          train_end = max(date),
+          train_days = n()
+        )
+      
+      val_dates <- val_data |>
+        summarise(
+          val_start = min(date),
+          val_end = max(date),
+          val_days = n()
+        )
+      
+      # Create fold ID - use the split's id if available, otherwise create one
+      fold_id <- if (!is.null(split$id)) split$id else "Unknown"
+      
+      bind_cols(
+        id = fold_id,
+        train_dates,
+        val_dates
+      )
+    })
+  
+  fold_info |>
+    mutate(
+      training_period = paste(format(train_start, "%d-%b-%y"), "to", format(train_end, "%d-%b-%y")),
+      validation_period = paste(format(val_start, "%d-%b-%y"), "to", format(val_end, "%d-%b-%y"))
+    ) |>
+    select(id, training_period, validation_period, train_days, val_days)
+}
+```
+
+## Scenario 1: Cumulative = FALSE
+```{r, include=FALSE}
+resamples_demo_s1 <- training(splits_demo) |>
+  time_series_cv(
+    slice_limit = 5,
+    assess = "30 days", # testing period
+    skip = "14 days",
+    initial = "90 days",
+    cumulative = FALSE
+  )
+```
+
+```{r}
+cv_dates_s1 <- get_cv_dates(resamples_demo_s1)
+cv_dates_s1
+```
+
+- We see that when cumulative = FALSE, the training period is fixed at 30 days (initial)
+- The 'initial' parameter is linked to cumulative = FALSE. It is ignored when cumulative = TRUE.
+- Also note how the validation period is 7 days for each fold, and they differ by 14 days (skip period)
+- Cumulative = FALSE is not useful for time series data, as the training period remians fixed.
+- Let us visualize the CV plan
+
+```{r}
+plot_s1 <- plot_time_series_cv_plan(resamples_demo_s1, date, hosp_resp)
+plot_s1
+```
+
+As we can see, a fixed training period trains on different parts of the time series.
+This is sub-optimal as it is missing the information from the previous training periods.
+
+## Scenario 2: Cumulative = TRUE
+```{r, include=FALSE}
+resamples_demo_s2 <- training(splits_demo) |>
+  time_series_cv(
+    slice_limit = 5,
+    assess = "30 days",
+    skip = "14 days",
+    # initial = "90 days", # This is ignored when cumulative = TRUE
+    cumulative = TRUE
+  )
+```
+
+```{r}
+cv_dates_s2 <- get_cv_dates(resamples_demo_s2)
+cv_dates_s2
+```
+
+Notice how the training period is expanding over the folds, and the validation period is 30 days for each fold and they differ by 14 days (skip period)
+Let us visualize the CV plan
+```{r}
+plot_s2 <- plot_time_series_cv_plan(resamples_demo_s2, date, hosp_resp)
+plot_s2
+```
+
+The training period is expanding over the folds, while using the entire data available. 
+The validation period is 30 days for each fold and they differ by 14 days (skip period)
+We can experiment a bit more with the parameters to see how they affect the CV plan.
+
+```{r, include=FALSE}
+resamples_demo_s3 <- training(splits_demo) |>
+  time_series_cv(
+    slice_limit = 20,
+    assess = "60 days",
+    skip = "30 days",
+    # initial = "90 days",
+    cumulative = TRUE
+  )
+```
+
+```{r}
+cv_dates_s3 <- get_cv_dates(resamples_demo_s3)
+cv_dates_s3
+```
