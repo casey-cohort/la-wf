@@ -15,7 +15,7 @@
 
 #-------------------------------
 # setup
-rm(list = ls())
+# rm(list = ls())
 pacman::p_load(modeltime, tidymodels, tidyverse, timetk, Metrics,
                tictoc, digest, yaml, arrow, future, furrr, progressr)
 
@@ -61,19 +61,20 @@ tryCatch({
 })
 
 #------------------------------
-# TEST MODE - Uncomment to run on subset for testing
-# Comment out when running full batch
-# test_combinations <- data.frame(
-#   encounter_type = c("ED", "IP"),
-#   exposure_category = c("high_smoke", "high_smoke"),
-#   cause = c("num_enc_resp", "num_enc_resp")
-# )
-# config$models_to_run_flat <- map(1:nrow(test_combinations), ~list(
-#   encounter_type = test_combinations$encounter_type[.x],
-#   exposure_category = test_combinations$exposure_category[.x],
-#   cause = test_combinations$cause[.x]
-# ))
-# cat("*** RUNNING IN TEST MODE ***\n")
+# Check if running in test mode (controlled by 00_run_all.R)
+if (exists("TEST_MODE") && TEST_MODE) {
+  test_combinations <- data.frame(
+    encounter_type = c("ED", "IP"),
+    exposure_category = c("high_smoke", "high_smoke"),
+    cause = c("num_enc_resp", "num_enc_resp")
+  )
+  config$models_to_run_flat <- map(1:nrow(test_combinations), ~list(
+    encounter_type = test_combinations$encounter_type[.x],
+    exposure_category = test_combinations$exposure_category[.x],
+    cause = test_combinations$cause[.x]
+  ))
+  cat("*** RUNNING IN TEST MODE ***\n")
+}
 
 #------------------------------
 # Prepare combinations and estimate runtime
