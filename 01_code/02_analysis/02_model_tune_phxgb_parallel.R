@@ -24,10 +24,12 @@ source(paste0(getwd(), "/01_code/paths.R"))
 source(paste0(getwd(), "/01_code/utils.R"))
 
 # determine version number, construct folder name, make folder, set suffix for model version
-ver <- gen_ver_number(paste0(path_onedrive, "02_output/"))
-folder_name <- paste0("model_run_", Sys.Date(), ".", ver, "/")
+# use RUN_MODE if available (set by 00_run_all.R), otherwise default to "prod"
+run_mode <- if(exists("RUN_MODE")) RUN_MODE else "prod"
+ver <- gen_ver_number(paste0(path_onedrive, "02_output/"), mode = run_mode)
+folder_name <- paste0("model_run_", run_mode, "_", Sys.Date(), ".", ver, "/")
 dir.create(paste0(path_onedrive, "02_output/", folder_name), showWarnings = FALSE)
-mod_ver_suffix <- paste0(Sys.Date(), ".", ver)
+mod_ver_suffix <- paste0(run_mode, "_", Sys.Date(), ".", ver)
 
 # read config 
 config <- read_config(paste0(path_repo, "01_code/02_analysis/model_config.yaml"))
