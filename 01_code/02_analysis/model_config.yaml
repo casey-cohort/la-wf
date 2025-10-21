@@ -55,10 +55,10 @@ grid_params:
   stop_iter: [10, 50]
 
 train_test_params: 
-  assess_split: "75 days"
-  assess_cv: "40 days"
-  skip_cv: "40 days"
-  slice_limit_cv: 8
+  assess_split: "67 days"
+  assess_cv: "30 days"
+  skip_cv: "7 days"
+  slice_limit_cv: 5
 # can give a list of combinations so we can try many things -- so maybe increments of 5 and all combos. 
 
 

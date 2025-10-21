@@ -38,14 +38,14 @@ gen_seed <- function(global_seed, markers){
 # gen ver number 
 #-------------------------------
 # look for if today's date exists in output folder. if so, look at version number after the date, and increment it by 1. if not, start at v001. always pad with 0's such that the ver number is 3 digits.
-gen_ver_number <- function(path) {
+gen_ver_number <- function(path, mode = "prod") {
   all_dirs <- list.dirs(path, full.names = FALSE, recursive = FALSE)
   
   # get today's date in the format used in folder names
   today <- Sys.Date()
   
-  # filter for folders that match the pattern with today's date
-  pattern <- paste0("^model_run_", today, "\\.v\\d{3}$")
+  # filter for folders that match the pattern with today's date and mode
+  pattern <- paste0("^model_run_", mode, "_", today, "\\.v\\d{3}$")
   existing_folders <- all_dirs[grepl(pattern, all_dirs)]
   
   if (length(existing_folders) == 0) {

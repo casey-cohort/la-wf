@@ -15,7 +15,7 @@
 
 #-------------------------------
 # setup
-rm(list = ls())
+# rm(list = ls())
 pacman::p_load(modeltime, tidymodels, tidyverse, timetk, Metrics,
                tictoc, digest, yaml, arrow, future, furrr, progressr)
 
@@ -24,10 +24,12 @@ source(paste0(getwd(), "/01_code/paths.R"))
 source(paste0(getwd(), "/01_code/utils.R"))
 
 # determine version number, construct folder name, make folder, set suffix for model version
-ver <- gen_ver_number(paste0(path_onedrive, "02_output/"))
-folder_name <- paste0("model_run_", Sys.Date(), ".", ver, "/")
+# use RUN_MODE if available (set by 00_run_all.R), otherwise default to "prod"
+run_mode <- if(exists("RUN_MODE")) RUN_MODE else "prod"
+ver <- gen_ver_number(paste0(path_onedrive, "02_output/"), mode = run_mode)
+folder_name <- paste0("model_run_", run_mode, "_", Sys.Date(), ".", ver, "/")
 dir.create(paste0(path_onedrive, "02_output/", folder_name), showWarnings = FALSE)
-mod_ver_suffix <- paste0(Sys.Date(), ".", ver)
+mod_ver_suffix <- paste0(run_mode, "_", Sys.Date(), ".", ver)
 
 # read config 
 config <- read_config(paste0(path_repo, "01_code/02_analysis/model_config.yaml"))
@@ -61,19 +63,20 @@ tryCatch({
 })
 
 #------------------------------
-# TEST MODE - Uncomment to run on subset for testing
-# Comment out when running full batch
-# test_combinations <- data.frame(
-#   encounter_type = c("ED", "IP"),
-#   exposure_category = c("high_smoke", "high_smoke"),
-#   cause = c("num_enc_resp", "num_enc_resp")
-# )
-# config$models_to_run_flat <- map(1:nrow(test_combinations), ~list(
-#   encounter_type = test_combinations$encounter_type[.x],
-#   exposure_category = test_combinations$exposure_category[.x],
-#   cause = test_combinations$cause[.x]
-# ))
-# cat("*** RUNNING IN TEST MODE ***\n")
+# Check if running in test mode (controlled by 00_run_all.R)
+if (exists("TEST_MODE") && TEST_MODE) {
+  test_combinations <- data.frame(
+    encounter_type = c("ED", "IP"),
+    exposure_category = c("high_smoke", "high_smoke"),
+    cause = c("num_enc_resp", "num_enc_resp")
+  )
+  config$models_to_run_flat <- map(1:nrow(test_combinations), ~list(
+    encounter_type = test_combinations$encounter_type[.x],
+    exposure_category = test_combinations$exposure_category[.x],
+    cause = test_combinations$cause[.x]
+  ))
+  cat("*** RUNNING IN TEST MODE ***\n")
+}
 
 #------------------------------
 # Prepare combinations and estimate runtime
