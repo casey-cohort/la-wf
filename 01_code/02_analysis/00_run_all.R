@@ -8,6 +8,64 @@ cat("Prophet + XGBoost Analysis Pipeline\n")
 cat("with Moving Block Bootstrap CIs\n")
 cat("========================================\n\n")
 
+# Load timing library
+pacman::p_load(tictoc)
+
+# Initialize timing variables
+pipeline_start_time <- Sys.time()
+step_times <- list()
+step_names <- c("Data Preparation", "Model Tuning", "MBB Confidence Intervals", "Generate Outputs")
+
+cat("Pipeline started at:", format(pipeline_start_time, "%Y-%m-%d %H:%M:%S"), "\n\n")
+
+# Helper function for step timing
+run_timed_step <- function(step_num, step_name, script_path, ...) {
+  cat("========================================\n")
+  cat("STEP", step_num, ":", step_name, "\n")
+  cat("========================================\n")
+  
+  step_start_time <- Sys.time()
+  cat("Step", step_num, "started at:", format(step_start_time, "%Y-%m-%d %H:%M:%S"), "\n")
+  
+  # Run any additional setup code if provided
+  if (length(list(...)) > 0) {
+    for (setup_code in list(...)) {
+      eval(setup_code)
+    }
+  }
+  
+  # Source the main script
+  source(script_path)
+  
+  step_end_time <- Sys.time()
+  step_duration <- step_end_time - step_start_time
+  
+  # Store timing info
+  step_times[[paste0("step", step_num)]] <<- list(
+    name = step_name,
+    start_time = step_start_time,
+    end_time = step_end_time,
+    duration = step_duration,
+    executed = TRUE
+  )
+  
+  cat("\n", step_name, "complete!\n")
+  cat("Step", step_num, "duration:", round(as.numeric(step_duration, units = "mins"), 2), "minutes\n\n")
+}
+
+# Helper function for skipped steps
+skip_step <- function(step_num, step_name, reason = "Using results from previous version") {
+  cat("========================================\n")
+  cat("STEP", step_num, ":", step_name, "(SKIPPED)\n")
+  cat("========================================\n")
+  cat(reason, "\n\n")
+  
+  step_times[[paste0("step", step_num)]] <<- list(
+    name = step_name,
+    executed = FALSE
+  )
+}
+
 # Setup ----
 
 # Helper function to get user input in both interactive and terminal modes
@@ -261,17 +319,9 @@ cat("\nStarting pipeline...\n\n")
 # ============================================================================
 
 if (RESUME_FROM_STEP <= 1) {
-  cat("========================================\n")
-  cat("STEP 1: Data Preparation\n")
-  cat("========================================\n")
-  
-  source(paste0(getwd(), "/01_code/02_analysis/01_data_prep.R"))
-  cat("\nData preparation complete!\n\n")
+  run_timed_step(1, step_names[1], paste0(getwd(), "/01_code/02_analysis/01_data_prep.R"))
 } else {
-  cat("========================================\n")
-  cat("STEP 1: Data Preparation (SKIPPED)\n")
-  cat("========================================\n")
-  cat("Using latest dated data folder from previous run.\n\n")
+  skip_step(1, step_names[1], "Using latest dated data folder from previous run")
 }
 
 # ============================================================================
@@ -279,12 +329,7 @@ if (RESUME_FROM_STEP <= 1) {
 # ============================================================================
 
 if (RESUME_FROM_STEP <= 2) {
-  cat("========================================\n")
-  cat("STEP 2: Model Tuning\n")
-  cat("========================================\n")
-  
-  source(paste0(getwd(), "/01_code/02_analysis/02_model_tune_phxgb_parallel.R"))
-  cat("\nModel tuning complete!\n\n")
+  run_timed_step(2, step_names[2], paste0(getwd(), "/01_code/02_analysis/02_model_tune_phxgb_parallel.R"))
   
   # If resuming, copy previous files after new version folder is created
   if (!is.null(PREVIOUS_VERSION) && RESUME_FROM_STEP >= 2) {
@@ -295,10 +340,7 @@ if (RESUME_FROM_STEP <= 2) {
     }
   }
 } else {
-  cat("========================================\n")
-  cat("STEP 2: Model Tuning (SKIPPED)\n")
-  cat("========================================\n")
-  cat("Using results from previous version.\n\n")
+  skip_step(2, step_names[2])
 }
 
 # ============================================================================
@@ -306,30 +348,23 @@ if (RESUME_FROM_STEP <= 2) {
 # ============================================================================
 
 if (RESUME_FROM_STEP <= 3) {
-  cat("========================================\n")
-  cat("STEP 3: MBB Confidence Intervals\n")
-  cat("========================================\n")
+  # Setup code for Step 3
+  setup_code <- if (RESUME_FROM_STEP == 3 && !is.null(PREVIOUS_VERSION)) {
+    quote({
+      # Step 2 didn't run, so we need to create the version folder and copy files
+      source(paste0(getwd(), "/01_code/paths.R"))
+      source(paste0(getwd(), "/01_code/utils.R"))
+      ver <- gen_ver_number(paste0(path_onedrive, "02_output/"), mode = RUN_MODE)
+      folder_name <- paste0("model_run_", RUN_MODE, "_", Sys.Date(), ".", ver, "/")
+      dir.create(paste0(path_onedrive, "02_output/", folder_name), showWarnings = FALSE)
+      new_version_dir <- paste0(path_onedrive, "02_output/", folder_name)
+      copy_previous_files(PREVIOUS_VERSION, new_version_dir, RESUME_FROM_STEP)
+    })
+  } else NULL
   
-  # If skipping Step 2, copy files now
-  if (RESUME_FROM_STEP == 3 && !is.null(PREVIOUS_VERSION)) {
-    # Step 2 didn't run, so we need to create the version folder and copy files
-    # Source the beginning of step 2 to create folder, then copy
-    source(paste0(getwd(), "/01_code/paths.R"))
-    source(paste0(getwd(), "/01_code/utils.R"))
-    ver <- gen_ver_number(paste0(path_onedrive, "02_output/"), mode = RUN_MODE)
-    folder_name <- paste0("model_run_", RUN_MODE, "_", Sys.Date(), ".", ver, "/")
-    dir.create(paste0(path_onedrive, "02_output/", folder_name), showWarnings = FALSE)
-    new_version_dir <- paste0(path_onedrive, "02_output/", folder_name)
-    copy_previous_files(PREVIOUS_VERSION, new_version_dir, RESUME_FROM_STEP)
-  }
-  
-  source(paste0(getwd(), "/01_code/02_analysis/04_model_mbb_cis.R"))
-  cat("\nMBB CI generation complete!\n\n")
+  run_timed_step(3, step_names[3], paste0(getwd(), "/01_code/02_analysis/04_model_mbb_cis.R"), setup_code)
 } else {
-  cat("========================================\n")
-  cat("STEP 3: MBB Confidence Intervals (SKIPPED)\n")
-  cat("========================================\n")
-  cat("Using results from previous version.\n\n")
+  skip_step(3, step_names[3])
 }
 
 # ============================================================================
@@ -337,24 +372,21 @@ if (RESUME_FROM_STEP <= 3) {
 # ============================================================================
 
 if (RESUME_FROM_STEP <= 4) {
-  cat("========================================\n")
-  cat("STEP 4: Generate Outputs\n")
-  cat("========================================\n")
+  # Setup code for Step 4
+  setup_code <- if (RESUME_FROM_STEP == 4 && !is.null(PREVIOUS_VERSION)) {
+    quote({
+      # Steps 2 and 3 didn't run, so we need to create the version folder and copy files
+      source(paste0(getwd(), "/01_code/paths.R"))
+      source(paste0(getwd(), "/01_code/utils.R"))
+      ver <- gen_ver_number(paste0(path_onedrive, "02_output/"), mode = RUN_MODE)
+      folder_name <- paste0("model_run_", RUN_MODE, "_", Sys.Date(), ".", ver, "/")
+      dir.create(paste0(path_onedrive, "02_output/", folder_name), showWarnings = FALSE)
+      new_version_dir <- paste0(path_onedrive, "02_output/", folder_name)
+      copy_previous_files(PREVIOUS_VERSION, new_version_dir, RESUME_FROM_STEP)
+    })
+  } else NULL
   
-  # If skipping Steps 2 and 3, copy files now
-  if (RESUME_FROM_STEP == 4 && !is.null(PREVIOUS_VERSION)) {
-    # Steps 2 and 3 didn't run, so we need to create the version folder and copy files
-    source(paste0(getwd(), "/01_code/paths.R"))
-    source(paste0(getwd(), "/01_code/utils.R"))
-    ver <- gen_ver_number(paste0(path_onedrive, "02_output/"), mode = RUN_MODE)
-    folder_name <- paste0("model_run_", RUN_MODE, "_", Sys.Date(), ".", ver, "/")
-    dir.create(paste0(path_onedrive, "02_output/", folder_name), showWarnings = FALSE)
-    new_version_dir <- paste0(path_onedrive, "02_output/", folder_name)
-    copy_previous_files(PREVIOUS_VERSION, new_version_dir, RESUME_FROM_STEP)
-  }
-  
-  source(paste0(getwd(), "/01_code/02_analysis/05_model_outputs.R"))
-  cat("\nOutput generation complete!\n\n")
+  run_timed_step(4, step_names[4], paste0(getwd(), "/01_code/02_analysis/05_model_outputs.R"), setup_code)
 }
 
 # ============================================================================
@@ -364,6 +396,50 @@ if (RESUME_FROM_STEP <= 4) {
 cat("========================================\n")
 cat("PIPELINE COMPLETE!\n")
 cat("========================================\n\n")
+
+# Calculate overall pipeline timing
+pipeline_end_time <- Sys.time()
+pipeline_total_duration <- pipeline_end_time - pipeline_start_time
+
+cat("TIMING SUMMARY\n")
+cat("========================================\n")
+cat("Pipeline started at:", format(pipeline_start_time, "%Y-%m-%d %H:%M:%S"), "\n")
+cat("Pipeline completed at:", format(pipeline_end_time, "%Y-%m-%d %H:%M:%S"), "\n")
+cat("Total pipeline duration:", round(as.numeric(pipeline_total_duration, units = "mins"), 2), "minutes\n")
+cat("Total pipeline duration:", round(as.numeric(pipeline_total_duration, units = "hours"), 2), "hours\n\n")
+
+cat("Step-by-step timing:\n")
+cat("----------------------------------------\n")
+total_executed_time <- 0
+executed_steps <- 0
+skipped_steps <- 0
+
+for (i in 1:4) {
+  step_key <- paste0("step", i)
+  if (step_key %in% names(step_times)) {
+    step_info <- step_times[[step_key]]
+    if (step_info$executed) {
+      duration_mins <- round(as.numeric(step_info$duration, units = "mins"), 2)
+      duration_hours <- round(as.numeric(step_info$duration, units = "hours"), 2)
+      cat(sprintf("Step %d: %s\n", i, step_info$name))
+      cat(sprintf("  Duration: %.2f minutes (%.2f hours)\n", duration_mins, duration_hours))
+      cat(sprintf("  Started: %s\n", format(step_info$start_time, "%H:%M:%S")))
+      cat(sprintf("  Ended: %s\n", format(step_info$end_time, "%H:%M:%S")))
+      total_executed_time <- total_executed_time + as.numeric(step_info$duration, units = "mins")
+      executed_steps <- executed_steps + 1
+    } else {
+      cat(sprintf("Step %d: %s (SKIPPED)\n", i, step_info$name))
+      skipped_steps <- skipped_steps + 1
+    }
+  }
+}
+
+cat("\nSummary:\n")
+cat("----------------------------------------\n")
+cat("Steps executed:", executed_steps, "\n")
+cat("Steps skipped:", skipped_steps, "\n")
+cat("Total execution time:", round(total_executed_time, 2), "minutes\n")
+cat("Total execution time:", round(total_executed_time / 60, 2), "hours\n\n")
 
 # Find output directory (using mode-specific pattern)
 latest_dir <- find_latest_version(paste0(path_onedrive, "02_output/"), mode = RUN_MODE)
