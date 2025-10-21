@@ -6,7 +6,10 @@
 
 #-------------------------------
 # setup
-rm(list=ls())
+# Only clear environment if running standalone, not when sourced
+if (!exists("pipeline_start_time")) {
+  rm(list=ls())
+}
 if (!requireNamespace('pacman', quietly = TRUE)) {install.packages('pacman')}
 pacman::p_load(tidyverse, readr, tidyr, purrr, lubridate, MMWRweek, here, arrow)
 
@@ -45,7 +48,7 @@ resp_virus_long <- resp_virus %>%
 
 df <- df_temp %>%
   group_by(exposure_category, enc_type, encounter_dt) %>%
-  summarise(across(everything(), sum, na.rm = TRUE)) %>%
+  summarise(across(c(num_enc, num_enc_cardio, num_enc_resp, num_enc_neuro, num_enc_injury), sum, na.rm = TRUE)) %>%
   mutate(encounter_dt = mdy(encounter_dt),
          mmwr_week=MMWRweek(encounter_dt)$MMWRweek,
          year=year(encounter_dt)) # create MMWR week variable
