@@ -1,51 +1,28 @@
 seed: 0112358
-data_version: "dummy"
-# Either specify models_to_run, which gives a cartesian product of 
-# the encounter, exposure, and cause values, or specify models_to_run_flat,
-# which gives an explicit list of models to run. If both are specified,
-# we will fail with an error.
+
+# Specify which models to run using ONE of the following approaches:
 #
-# Examples:
-# 1. Run all models
-# models_to_run:
-#   encounter_type: ["*"]
-#   exposure_category: ["*"]
-#   cause: ["*"]
+# OPTION 1: models_to_run (cartesian product - runs all combinations)
+# OPTION 2: models_to_run_flat (explicit list - run specific combinations only)
 #
-# 2. Run a all respiratory models
-# models_to_run:
-#   encounter_type: ["*"]
-#   exposure_category: ["*"]
-#   cause: ["num_enc_resp"]
-#
-# 3. Run only inpatient evac respiratory and ed smoke cardiovascular
+# See README.md for detailed examples and usage instructions.
+# IMPORTANT: Use multi-line format for models_to_run_flat (as shown below).
+
+# OPTION 1: Uncomment to use cartesian product
+models_to_run:
+  encounter_type: ["IP", "ED"]
+  exposure_category: ["evac", "high_smoke", "mid_smoke", "none"]
+  cause: ["num_enc", "num_enc_resp", "num_enc_cardio", "num_enc_injury", "num_enc_neuro"]
+
+# OPTION 2: Currently active (comment out to use models_to_run instead)
 # models_to_run_flat:
 #   - encounter_type: "IP"
 #     exposure_category: "evac"
 #     cause: "num_enc_resp"
 #   - encounter_type: "ED"
-#     exposure_category: "smoke"
+#     exposure_category: "high_smoke"
 #     cause: "num_enc_cardio"
-#
-models_to_run:
-  encounter_type:
-  - "IP"
-  - "ED"
-  exposure_category:
-  - "evac"
-  - "high_smoke"
-  - "mid_smoke"
-  - "none"
-  cause:
-  - "num_enc"
-  - "num_enc_resp"
-  - "num_enc_cardio"
-  - "num_enc_injury"
-  - "num_enc_neuro"
-# models_to_run_flat:
-#   - encounter_type: "IP"
-#     exposure_category: "evac"
-#     cause: "num_enc_resp"
+
 grid_params:
   mtry: [3, 10]
   min_n: [5, 30]
@@ -59,7 +36,10 @@ train_test_params:
   assess_cv: "30 days"
   skip_cv: "7 days"
   slice_limit_cv: 5
-# can give a list of combinations so we can try many things -- so maybe increments of 5 and all combos. 
+# can give a list of combinations so we can try many things -- so maybe increments of 5 and all combos.
+
+# Number of moving block bootstrap simulations for confidence intervals
+n_sim_mbb: 100
 
 
 # For later, we want to be able to have different sets of params run
