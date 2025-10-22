@@ -11,15 +11,9 @@ source(paste0(getwd(), "/01_code/paths.R"))
 source(paste0(getwd(), "/01_code/utils.R"))
 source(paste0(getwd(), "/01_code/utils_mbb.R"))
 
-# Check for test mode
-test_mode <- exists("TEST_MODE") && TEST_MODE
-if (test_mode) {
-  cat("*** RUNNING IN TEST MODE - Using 100 MBB simulations ***\n")
-  n_sim <- 100
-} else {
-  cat("Running in production mode - Using 1000 MBB simulations\n")
-  n_sim <- 1000
-}
+# Read config to get n_sim_mbb
+config <- yaml::read_yaml(paste0(getwd(), "/01_code/02_analysis/model_config.yaml"))
+n_sim <- config$n_sim_mbb
 
 # Set MBB parameters
 L_block <- 14  # Block length (days)
@@ -30,14 +24,11 @@ cat("  Number of simulations:", n_sim, "\n")
 cat("  Block length:", L_block, "days\n\n")
 
 # Find latest model results ----
-# Use RUN_MODE if available (set by 00_run_all.R), otherwise default to "prod"
-run_mode <- if(exists("RUN_MODE")) RUN_MODE else "prod"
-
-# Use mode-aware function to find latest directory (defined in utils.R)
-find_latest_version <- function(output_path, mode = "prod") {
+# Use new folder naming pattern: model_run_YYYY-MM-DD.v###_x##_sim###
+find_latest_version <- function(output_path) {
   output_dirs <- list.dirs(output_path, full.names = TRUE, recursive = FALSE)
-  # Filter by mode (test or prod)
-  pattern <- paste0("model_run_", mode, "_")
+  # Filter by new pattern
+  pattern <- "^model_run_\\d{4}-\\d{2}-\\d{2}\\.v\\d{3}_x\\d+_sim\\d+$"
   output_dirs <- output_dirs[grepl(pattern, basename(output_dirs))]
   if (length(output_dirs) == 0) {
     return(NULL)
@@ -46,14 +37,13 @@ find_latest_version <- function(output_path, mode = "prod") {
   return(latest_dir)
 }
 
-latest_dir <- find_latest_version(paste0(path_onedrive, "02_output/"), mode = run_mode)
+latest_dir <- find_latest_version(paste0(path_onedrive, "02_output/"))
 
 if (is.null(latest_dir)) {
-  stop(paste0("No model output directories found for mode: ", run_mode, ". Please run 02_model_tune_phxgb_parallel.R first."))
+  stop("No model output directories found. Please run 02_model_tune_phxgb_parallel.R first.")
 }
 
 cat("Loading model results from:", latest_dir, "\n")
-cat("Run mode:", run_mode, "\n")
 
 # Find the nested results file
 results_files <- list.files(latest_dir, pattern = "all_results_nested_.*\\.RData", full.names = TRUE)
@@ -140,22 +130,40 @@ for (enc in names(all_results)) {
         train_df <- rsample::training(splits)
         test_df <- rsample::testing(splits)
         
-        # Refit final model with best parameters
-        wflw_phxgb_tune <- result$wflw_phxgb_tune
-        tune_results_phxgb <- result$tune_results_phxgb
-        
-        wflw_fit_seed <- gen_seed(global_seed, c(enc, exposure, cause, "wflw_fit_mbb"))
-        set.seed(wflw_fit_seed)
-        
-        wflw_fit <- suppressWarnings({
-          suppressMessages({
-            wflw_phxgb_tune |>
-              finalize_workflow(select_best(tune_results_phxgb, metric = "rmse")) |>
-              fit(train_df)
-          })
-        })
-        
+        # Rebuild and fit workflow from scratch to avoid XGBoost serialization issues
+        cat("  Fitting final model...\n")
+        wflw_fit <- rebuild_and_fit_workflow(
+          result = result,
+          train_df = train_df,
+          global_seed = global_seed,
+          enc = enc,
+          exposure = exposure,
+          cause = cause
+        )
         cat("  Model fitted successfully\n")
+        
+        # Extract unfitted recipe and create model spec with best params
+        # (needed to avoid XGBoost serialization issues in MBB)
+        rec_obj_unfitted <- result$rec_obj_phxgb
+        best_params <- result$best_params
+        
+        # Create model spec with best parameters
+        model_seed <- gen_seed(global_seed, c(enc, exposure, cause, "model_mbb"))
+        model_spec_mbb <- prophet_boost(
+          mode = "regression",
+          growth = "linear",
+          seasonality_yearly = FALSE,
+          mtry = best_params$mtry,
+          min_n = best_params$min_n,
+          tree_depth = best_params$tree_depth,
+          learn_rate = best_params$learn_rate,
+          loss_reduction = best_params$loss_reduction,
+          stop_iter = best_params$stop_iter
+        ) %>%
+          set_engine("prophet_xgboost",
+                     seed = model_seed,
+                     early_stop = TRUE,
+                     validation = 0.2)
         
         # Generate predictions for training set (no bootstrap)
         cat("  Generating training predictions...\n")
@@ -175,7 +183,9 @@ for (enc in names(all_results)) {
           outcome_col = cause,
           n_sim = n_sim,
           L_block = L_block,
-          seed = seed
+          seed = seed,
+          rec_obj_unfitted = rec_obj_unfitted,
+          model_spec = model_spec_mbb
         )
         toc()
         
@@ -190,7 +200,9 @@ for (enc in names(all_results)) {
             outcome_col = cause,
             n_sim = n_sim,
             L_block = L_block,
-            seed = seed
+            seed = seed,
+            rec_obj_unfitted = rec_obj_unfitted,
+            model_spec = model_spec_mbb
           )
           toc()
         } else {

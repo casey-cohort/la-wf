@@ -38,14 +38,16 @@ gen_seed <- function(global_seed, markers){
 # gen ver number 
 #-------------------------------
 # look for if today's date exists in output folder. if so, look at version number after the date, and increment it by 1. if not, start at v001. always pad with 0's such that the ver number is 3 digits.
-gen_ver_number <- function(path, mode = "prod") {
+# New format: model_run_YYYY-MM-DD.v###_x##_sim###
+gen_ver_number <- function(path) {
   all_dirs <- list.dirs(path, full.names = FALSE, recursive = FALSE)
   
   # get today's date in the format used in folder names
   today <- Sys.Date()
   
-  # filter for folders that match the pattern with today's date and mode
-  pattern <- paste0("^model_run_", mode, "_", today, "\\.v\\d{3}$")
+  # filter for folders that match the pattern with today's date
+  # Pattern matches: model_run_2025-10-22.v001_x20_sim1000
+  pattern <- paste0("^model_run_", today, "\\.v\\d{3}_x\\d+_sim\\d+$")
   existing_folders <- all_dirs[grepl(pattern, all_dirs)]
   
   if (length(existing_folders) == 0) {
@@ -53,10 +55,10 @@ gen_ver_number <- function(path, mode = "prod") {
   } else {
     # extract version numbers from existing folders
     versions <- sapply(existing_folders, function(x) {
-      # extract the version number (the 3 digits after .v)
-      version_match <- regmatches(x, regexpr("\\.v(\\d{3})$", x))
+      # extract the version number (the 3 digits after .v and before _x)
+      version_match <- regmatches(x, regexpr("\\.v(\\d{3})_", x))
       if (length(version_match) > 0) {
-        as.integer(sub("\\.v(\\d{3})$", "\\1", version_match))
+        as.integer(sub("\\.v(\\d{3})_", "\\1", version_match))
       } else {
         0
       }
@@ -83,26 +85,34 @@ read_config <- function(file_path) {
   # Read in YAML file -------------------------------
   config <- yaml::read_yaml(file_path)
 
-  # Format models to run list -------------------------------
-  ## ensure we have only models_to_run or models_to_run_flat
+  # Handle YAML parser quirk that creates duplicate fields -------------------------------
+  # When using multi-line format for models_to_run_flat, the parser creates both 
+  # models_to_run and models_to_run_flat as references to the same object
+  yaml_parser_created_duplicate <- FALSE
   if(!is.null(config$models_to_run) & !is.null(config$models_to_run_flat)){
-    stop("Error: Must provide only one of models_to_run or models_to_run_flat in the config file.")
+    # Check if they're identical (YAML parsing quirk with multi-line format)
+    if(identical(config$models_to_run, config$models_to_run_flat)){
+      # Mark this as a parser quirk (they're the same object, use models_to_run_flat)
+      yaml_parser_created_duplicate <- TRUE
+    } else {
+      # If they're different, user specified both which is an error
+      stop("Error: Must provide only one of 'models_to_run' (cartesian product) or 'models_to_run_flat' (explicit list) in the config file.")
+    }
   }
 
-  ## ensure at least one of models_to_run or models_to_run_flat is provided
+  # Validate that at least one is provided -------------------------------
   if(is.null(config$models_to_run) & is.null(config$models_to_run_flat)){
-    stop("Error: Must provide one of models_to_run or models_to_run_flat in the config file.")
+    stop("Error: Must provide either 'models_to_run' or 'models_to_run_flat' in the config file.")
   }
 
-  # if models_to_run is provided -------------------------------
-  # convert it to models_to_run_flat and delete models_to_run from config
-    # this ensures that we always have models_to_run_flat to work with downstream  
-    # step 1: extract the vectors from the nested structure
+  # If models_to_run is provided (and not a YAML parser duplicate), expand to cartesian product -------
+  if(!is.null(config$models_to_run) & !yaml_parser_created_duplicate){
+    # Extract the vectors from the nested structure
     encounter_types <- config$models_to_run$encounter_type
     exposure_categories <- config$models_to_run$exposure_category
     causes <- config$models_to_run$cause
     
-    # step 2: reate all combinations using expand.grid
+    # Create all combinations using expand.grid
     combinations <- expand.grid(
       encounter_type = encounter_types,
       exposure_category = exposure_categories,
@@ -110,7 +120,7 @@ read_config <- function(file_path) {
       stringsAsFactors = FALSE
     )
     
-    # step 3: convert to list of lists with clean character values
+    # Convert to list of lists
     models_to_run_flat <- lapply(1:nrow(combinations), function(i) {
       list(
         encounter_type = as.character(combinations$encounter_type[i]),
@@ -119,21 +129,37 @@ read_config <- function(file_path) {
       )
     })
     
-    # if we started with models_to_run, remove it from config
-    config$models_to_run <- NULL
-    
-    # assign the models_to_run to models_to_run_flat in config
+    # Store as models_to_run_flat
     config$models_to_run_flat <- models_to_run_flat
+    # Keep models_to_run for reference
+  }
+
+  # Validate that models_to_run_flat is not empty -------------------------------
+  if(length(config$models_to_run_flat) == 0){
+    stop("Error: 'models_to_run_flat' cannot be empty.")
+  }
 
   # Make sure everything in models_to_run_flat is unique -------------------------------
-  if(
-    length(config$models_to_run_flat) == 
-    length(unique(config$models_to_run_flat))
-    ){
-      return(config)
-    } else {
-      stop("Error: you have specified duplicate model combinations! Please make sure all encounter_type -- exposure_category -- cause combinations are unique.")
-    }
+  # Convert to data frame for proper duplicate checking
+  combinations_df <- do.call(rbind, lapply(config$models_to_run_flat, function(x) {
+    data.frame(
+      encounter_type = x$encounter_type,
+      exposure_category = x$exposure_category,
+      cause = x$cause,
+      stringsAsFactors = FALSE
+    )
+  }))
+  
+  # Check for duplicates
+  if(nrow(combinations_df) != nrow(unique(combinations_df))){
+    # Find and report duplicates
+    duplicates <- combinations_df[duplicated(combinations_df) | duplicated(combinations_df, fromLast = TRUE), ]
+    cat("Duplicate combinations found:\n")
+    print(duplicates)
+    stop("Error: you have specified duplicate model combinations! Please make sure all encounter_type -- exposure_category -- cause combinations are unique.")
+  }
+  
+  return(config)
 
 }
 
