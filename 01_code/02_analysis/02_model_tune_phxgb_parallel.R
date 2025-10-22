@@ -23,16 +23,19 @@ pacman::p_load(modeltime, tidymodels, tidyverse, timetk, Metrics,
 source(paste0(getwd(), "/01_code/paths.R"))
 source(paste0(getwd(), "/01_code/utils.R"))
 
-# determine version number, construct folder name, make folder, set suffix for model version
-# use RUN_MODE if available (set by 00_run_all.R), otherwise default to "prod"
-run_mode <- if(exists("RUN_MODE")) RUN_MODE else "prod"
-ver <- gen_ver_number(paste0(path_onedrive, "02_output/"), mode = run_mode)
-folder_name <- paste0("model_run_", run_mode, "_", Sys.Date(), ".", ver, "/")
-dir.create(paste0(path_onedrive, "02_output/", folder_name), showWarnings = FALSE)
-mod_ver_suffix <- paste0(run_mode, "_", Sys.Date(), ".", ver)
-
-# read config 
+# read config first to get model count and n_sim_mbb
 config <- read_config(paste0(path_repo, "01_code/02_analysis/model_config.yaml"))
+
+# count number of models to run
+n_models <- length(config$models_to_run_flat)
+n_sim_mbb <- config$n_sim_mbb
+
+# determine version number, construct folder name, make folder, set suffix for model version
+# new format: model_run_YYYY-MM-DD.v###_x##_sim###
+ver <- gen_ver_number(paste0(path_onedrive, "02_output/"))
+folder_name <- paste0("model_run_", Sys.Date(), ".", ver, "_x", n_models, "_sim", n_sim_mbb, "/")
+dir.create(paste0(path_onedrive, "02_output/", folder_name), showWarnings = FALSE)
+mod_ver_suffix <- paste0(Sys.Date(), ".", ver, "_x", n_models, "_sim", n_sim_mbb)
 
 # write this ver of config back out
 write_config(config, paste0(path_onedrive, "02_output/", folder_name, "model_config_", mod_ver_suffix, ".yaml"))
@@ -61,22 +64,6 @@ tryCatch({
 }, error = function(e) {
   cat("Memory info not available\n")
 })
-
-#------------------------------
-# Check if running in test mode (controlled by 00_run_all.R)
-if (exists("TEST_MODE") && TEST_MODE) {
-  test_combinations <- data.frame(
-    encounter_type = c("ED", "IP"),
-    exposure_category = c("high_smoke", "high_smoke"),
-    cause = c("num_enc_resp", "num_enc_resp")
-  )
-  config$models_to_run_flat <- map(1:nrow(test_combinations), ~list(
-    encounter_type = test_combinations$encounter_type[.x],
-    exposure_category = test_combinations$exposure_category[.x],
-    cause = test_combinations$cause[.x]
-  ))
-  cat("*** RUNNING IN TEST MODE ***\n")
-}
 
 #------------------------------
 # Prepare combinations and estimate runtime
