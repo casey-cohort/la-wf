@@ -12,14 +12,11 @@ source(paste0(getwd(), "/01_code/utils.R"))
 source(paste0(getwd(), "/01_code/utils_outputs.R"))
 
 # Find latest MBB results ----
-# Use RUN_MODE if available (set by 00_run_all.R), otherwise default to "prod"
-run_mode <- if(exists("RUN_MODE")) RUN_MODE else "prod"
-
-# Use mode-aware function to find latest directory (defined in utils.R)
-find_latest_version <- function(output_path, mode = "prod") {
+# Use new folder naming pattern: model_run_YYYY-MM-DD.v###_x##_sim###
+find_latest_version <- function(output_path) {
   output_dirs <- list.dirs(output_path, full.names = TRUE, recursive = FALSE)
-  # Filter by mode (test or prod)
-  pattern <- paste0("model_run_", mode, "_")
+  # Filter by new pattern
+  pattern <- "^model_run_\\d{4}-\\d{2}-\\d{2}\\.v\\d{3}_x\\d+_sim\\d+$"
   output_dirs <- output_dirs[grepl(pattern, basename(output_dirs))]
   if (length(output_dirs) == 0) {
     return(NULL)
@@ -28,14 +25,13 @@ find_latest_version <- function(output_path, mode = "prod") {
   return(latest_dir)
 }
 
-latest_dir <- find_latest_version(paste0(path_onedrive, "02_output/"), mode = run_mode)
+latest_dir <- find_latest_version(paste0(path_onedrive, "02_output/"))
 
 if (is.null(latest_dir)) {
-  stop(paste0("No model output directories found for mode: ", run_mode))
+  stop("No model output directories found. Please run 04_model_mbb_cis.R first.")
 }
 
 cat("Loading MBB results from:", latest_dir, "\n")
-cat("Run mode:", run_mode, "\n")
 
 # Find the MBB results file
 mbb_files <- list.files(latest_dir, pattern = "mbb_results_nested_.*\\.rds", full.names = TRUE)
