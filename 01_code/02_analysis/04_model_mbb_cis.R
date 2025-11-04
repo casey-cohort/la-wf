@@ -3,6 +3,10 @@
 # Generate Moving Block Bootstrap confidence intervals for tuned models
 #-------------------------------
 
+cat("\n========================================\n")
+cat("STARTING 04_model_mbb_cis.R\n")
+cat("========================================\n\n")
+
 # Setup ----
 pacman::p_load(tidymodels, modeltime, tidyverse, timetk, arrow, boot, tictoc)
 
@@ -12,7 +16,7 @@ source(paste0(getwd(), "/01_code/utils.R"))
 source(paste0(getwd(), "/01_code/utils_mbb.R"))
 
 # Read config to get n_sim_mbb
-config <- yaml::read_yaml(paste0(getwd(), "/01_code/02_analysis/model_config.yaml"))
+config <- read_config(paste0(getwd(), "/01_code/02_analysis/model_config.yaml"))
 n_sim <- config$n_sim_mbb
 
 # Set MBB parameters
@@ -37,23 +41,41 @@ find_latest_version <- function(output_path) {
   return(latest_dir)
 }
 
-latest_dir <- find_latest_version(paste0(path_onedrive, "02_output/"))
+# Check if output directory was set by tuning script (for parallel tests)
+output_dir_env <- Sys.getenv("MODEL_OUTPUT_DIR", unset = "")
+cat("MODEL_OUTPUT_DIR environment variable:", ifelse(output_dir_env == "", "(not set)", output_dir_env), "\n")
 
-if (is.null(latest_dir)) {
-  stop("No model output directories found. Please run 02_model_tune_phxgb_parallel.R first.")
+if (output_dir_env != "" && dir.exists(output_dir_env)) {
+  latest_dir <- output_dir_env
+  cat("Using output directory from MODEL_OUTPUT_DIR environment variable:", latest_dir, "\n")
+} else {
+  cat("MODEL_OUTPUT_DIR not set or directory doesn't exist, falling back to find_latest_version()\n")
+  # Fall back to finding latest directory
+  latest_dir <- find_latest_version(paste0(path_onedrive, "02_output/"))
+  
+  if (is.null(latest_dir)) {
+    stop("No model output directories found. Please run 02_model_tune_phxgb_parallel.R first.")
+  }
+  
+  cat("Loading model results from:", latest_dir, "\n")
 }
-
-cat("Loading model results from:", latest_dir, "\n")
 
 # Find the nested results file
 results_files <- list.files(latest_dir, pattern = "all_results_nested_.*\\.RData", full.names = TRUE)
 if (length(results_files) == 0) {
+  cat("ERROR: No nested results file found in:", latest_dir, "\n")
+  cat("Looking for pattern: all_results_nested_*.RData\n")
+  cat("Files in directory:\n")
+  print(list.files(latest_dir))
   stop("No nested results file found in ", latest_dir)
 }
 results_file <- results_files[1]
-cat("Loading:", results_file, "\n\n")
+cat("Loading model results from:", results_file, "\n")
 
+# Load results
 load(results_file)
+cat("Results loaded successfully\n")
+cat("Number of encounter types in all_results:", length(all_results), "\n\n")
 
 # Load train/test data ----
 train_test_date <- max(list.dirs(paste0(path_onedrive, "01_data/02_processed/train_test/"), 
@@ -230,7 +252,11 @@ for (enc in names(all_results)) {
         cat("  Completed successfully\n\n")
         
       }, error = function(e) {
-        cat("  ERROR:", as.character(e), "\n\n")
+        cat("  ERROR processing", enc, "-", exposure, "-", cause, ":\n")
+        cat("    ", as.character(e), "\n")
+        cat("    Traceback:\n")
+        print(traceback())
+        cat("\n")
         mbb_results[[enc]][[exposure]][[cause]] <- list(
           error = as.character(e),
           enc_type = enc,
@@ -250,8 +276,32 @@ cat("\n=== Saving MBB results ===\n")
 mod_ver_suffix <- sub("model_run_", "", basename(latest_dir))
 output_file <- paste0(latest_dir, "/mbb_results_nested_", mod_ver_suffix, ".rds")
 
-saveRDS(mbb_results, output_file)
-cat("MBB results saved to:", output_file, "\n")
+cat("Preparing to save MBB results:\n")
+cat("  Output directory:", latest_dir, "\n")
+cat("  Output file:", output_file, "\n")
+cat("  Number of encounter types:", length(mbb_results), "\n")
+
+# Verify directory exists
+if (!dir.exists(latest_dir)) {
+  stop("Output directory does not exist:", latest_dir)
+}
+
+# Save with error handling
+tryCatch({
+  saveRDS(mbb_results, output_file)
+  if (file.exists(output_file)) {
+    file_size <- file.info(output_file)$size
+    cat("MBB results saved successfully!\n")
+    cat("  File:", output_file, "\n")
+    cat("  Size:", round(file_size / 1024 / 1024, 2), "MB\n")
+  } else {
+    stop("File was not created after saveRDS()")
+  }
+}, error = function(e) {
+  cat("ERROR saving MBB results:", as.character(e), "\n")
+  print(traceback())
+  stop("Failed to save MBB results")
+})
 
 # Summary
 successful <- 0
