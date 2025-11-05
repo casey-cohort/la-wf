@@ -26,10 +26,10 @@ test_configs <- list(
   # Test 1: shift mtry range up(only specify mtry, everything else stays from base config)
   test1 = list(
     name = "wide_mtry",
-    description = "Test: mtry range [16,30] and min_n [10,40] and tree_depth [2,10] and stop_iter [15,60]",
+    description = "Test: mtry range [16,30] and min_n [1,40] and tree_depth [2,10] and stop_iter [15,60]",
     modifications = list(
       grid_params = list(
-        min_n = c(10,40),
+        min_n = c(1,40),
         tree_depth = c(2, 10),
         stop_iter = c(15, 60),
         mtry = c(16, 30)
@@ -41,11 +41,13 @@ test_configs <- list(
   # Test 2: wider min_n range
   test2 = list(
     name = "wider_min_n",
-    description = "Test: mtry range [10,20] and min_n [10,40] and tree_depth [1,10] and stop_iter [10,50]",
+    description = "Test: mtry range [16,30] and min_n [10,40] and tree_depth [2,10] and stop_iter [15,60]",
     modifications = list(
       grid_params = list(
         min_n = c(10,40),
-        tree_depth = c(1, 10)
+        tree_depth = c(1, 10),
+        stop_iter = c(15, 60),
+        mtry = c(16, 30)
       )
     )
   )
@@ -259,8 +261,12 @@ if (choice == "1") {
     cat("  launching command...\n")
     
     # Launch in background using Rscript with output redirection to log file
-    cmd <- paste0("cd '", repo_dir, "' && nohup Rscript '", test_run$script_path, "' >> '", log_file, "' 2>&1 &")
-    system(cmd, wait = FALSE)
+    # Use system2 for better control over background processes
+    # Change to repo directory in the command to avoid affecting current session
+    system2("sh",
+            args = c("-c", 
+                    paste0("cd '", repo_dir, "' && Rscript '", test_run$script_path, "' >> '", log_file, "' 2>&1")),
+            wait = FALSE)
     
     # small delay to avoid file conflicts
     Sys.sleep(2)
@@ -293,21 +299,12 @@ if (choice == "1") {
   cat("3. check running processes: ps aux | grep Rscript\n")
   cat("4. tests will create dated folders like: model_run_YYYY-MM-DD.v###/\n\n")
   
-  # Wait a bit for processes to read their config files, then clean up
-  cat("waiting for processes to initialize (10 seconds)...\n")
-  Sys.sleep(10)
-  
-  # clean up temp files (config is saved in output folder by the model script)
-  cleaned_count <- 0
-  for (temp_file in temp_files) {
-    if (file.exists(temp_file)) {
-      unlink(temp_file)
-      cleaned_count <- cleaned_count + 1
-    }
-  }
-  
-  cat("cleaned up", cleaned_count, "temp files.\n")
-  cat("(config files are saved in each model run's output folder for reference)\n")
+  # NOTE: Do NOT clean up temp files in parallel mode - they're needed by Step 2 and Step 3
+  # The temp files will be cleaned up automatically when the R session ends
+  # Config files are saved in each model run's output folder for reference
+  cat("Note: Temp config files will remain until tests complete.\n")
+  cat("They are needed for Steps 2 and 3 (MBB and outputs).\n")
+  cat("Config files are also saved in each model run's output folder.\n\n")
   
 } else if (choice == "2") {
   # sequential execution 

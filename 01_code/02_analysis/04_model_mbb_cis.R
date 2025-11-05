@@ -16,7 +16,15 @@ source(paste0(getwd(), "/01_code/utils.R"))
 source(paste0(getwd(), "/01_code/utils_mbb.R"))
 
 # Read config to get n_sim_mbb
-config <- read_config(paste0(getwd(), "/01_code/02_analysis/model_config.yaml"))
+# Try to read from TEST_CONFIG_PATH first (for parallel tests), then fall back to default
+test_config_path <- Sys.getenv("TEST_CONFIG_PATH", unset = "")
+if (test_config_path != "" && file.exists(test_config_path)) {
+  config <- read_config(test_config_path)
+  cat("Using test config from environment:", test_config_path, "\n")
+} else {
+  # Fall back to default config location
+  config <- read_config(paste0(getwd(), "/01_code/02_analysis/model_config.yaml"))
+}
 n_sim <- config$n_sim_mbb
 
 # Set MBB parameters
