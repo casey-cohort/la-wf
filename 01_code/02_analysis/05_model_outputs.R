@@ -3,6 +3,10 @@
 # Generate plots, tables, and excess hospitalization calculations
 #-------------------------------
 
+cat("\n========================================\n")
+cat("STARTING 05_model_outputs.R\n")
+cat("========================================\n\n")
+
 # Setup ----
 pacman::p_load(tidyverse, ggplot2, patchwork, yardstick, gt, here, Metrics)
 
@@ -25,17 +29,32 @@ find_latest_version <- function(output_path) {
   return(latest_dir)
 }
 
-latest_dir <- find_latest_version(paste0(path_onedrive, "02_output/"))
+# Check if output directory was set by tuning script (for parallel tests)
+output_dir_env <- Sys.getenv("MODEL_OUTPUT_DIR", unset = "")
+cat("MODEL_OUTPUT_DIR environment variable:", ifelse(output_dir_env == "", "(not set)", output_dir_env), "\n")
 
-if (is.null(latest_dir)) {
-  stop("No model output directories found. Please run 04_model_mbb_cis.R first.")
+if (output_dir_env != "" && dir.exists(output_dir_env)) {
+  latest_dir <- output_dir_env
+  cat("Using output directory from MODEL_OUTPUT_DIR environment variable:", latest_dir, "\n")
+} else {
+  cat("MODEL_OUTPUT_DIR not set or directory doesn't exist, falling back to find_latest_version()\n")
+  # Fall back to finding latest directory
+  latest_dir <- find_latest_version(paste0(path_onedrive, "02_output/"))
+  
+  if (is.null(latest_dir)) {
+    stop("No model output directories found. Please run 02_model_tune_phxgb_parallel.R first.")
+  }
+  
+  cat("Loading MBB results from:", latest_dir, "\n")
 }
-
-cat("Loading MBB results from:", latest_dir, "\n")
 
 # Find the MBB results file
 mbb_files <- list.files(latest_dir, pattern = "mbb_results_nested_.*\\.rds", full.names = TRUE)
 if (length(mbb_files) == 0) {
+  cat("ERROR: No MBB results file found in:", latest_dir, "\n")
+  cat("Looking for pattern: mbb_results_nested_*.rds\n")
+  cat("Files in directory:\n")
+  print(list.files(latest_dir))
   stop("No MBB results file found. Please run 04_model_mbb_cis.R first.")
 }
 mbb_file <- mbb_files[1]
@@ -49,19 +68,34 @@ mod_ver_suffix <- sub("model_run_", "", basename(latest_dir))
 # Create output directories ----
 figures_dir <- paste0(latest_dir, "/figures/")
 tables_dir <- paste0(latest_dir, "/tables/")
+cat("Creating output directories:\n")
+cat("  Figures:", figures_dir, "\n")
+cat("  Tables:", tables_dir, "\n")
+
 dir.create(figures_dir, showWarnings = FALSE, recursive = TRUE)
 dir.create(tables_dir, showWarnings = FALSE, recursive = TRUE)
 
-cat("Output directories created:\n")
-cat("  Figures:", figures_dir, "\n")
-cat("  Tables:", tables_dir, "\n\n")
+# Verify directories were created
+if (!dir.exists(figures_dir)) {
+  stop("Failed to create figures directory:", figures_dir)
+}
+if (!dir.exists(tables_dir)) {
+  stop("Failed to create tables directory:", tables_dir)
+}
+
+cat("Output directories created successfully\n\n")
 
 # Initialize results storage ----
 all_metrics_list <- list()
 all_excess_list <- list()
 
 # Process each model combination ----
-cat("=== Generating Outputs ===\n\n")
+cat("=== Generating Outputs ===\n")
+cat("Number of encounter types:", length(mbb_results), "\n")
+if (length(mbb_results) == 0) {
+  stop("No MBB results found in mbb_results object")
+}
+cat("\n")
 
 for (enc in names(mbb_results)) {
   for (exposure in names(mbb_results[[enc]])) {
@@ -208,7 +242,19 @@ for (enc in names(mbb_results)) {
         
         # Save plot
         plot_file <- paste0(figures_dir, "model_fit_", enc, "_", exposure, "_", cause, ".pdf")
-        ggsave(plot_file, p_combined, width = 12, height = 10, dpi = 300)
+        cat("  Saving plot to:", plot_file, "\n")
+        
+        tryCatch({
+          ggsave(plot_file, p_combined, width = 12, height = 10, dpi = 300)
+          if (file.exists(plot_file)) {
+            cat("  Plot saved successfully!\n")
+          } else {
+            cat("  WARNING: Plot file was not created!\n")
+          }
+        }, error = function(e) {
+          cat("  ERROR saving plot:", as.character(e), "\n")
+          print(traceback())
+        })
         
         # ============================================================
         # 3. Calculate Excess Hospitalizations (Holdout period only)
@@ -278,7 +324,11 @@ for (enc in names(mbb_results)) {
         cat("  Completed successfully\n\n")
         
       }, error = function(e) {
-        cat("  ERROR:", as.character(e), "\n\n")
+        cat("  ERROR processing", enc, "-", exposure, "-", cause, ":\n")
+        cat("    ", as.character(e), "\n")
+        cat("    Traceback:\n")
+        print(traceback())
+        cat("\n")
       })
     }
   }

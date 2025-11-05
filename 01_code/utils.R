@@ -78,9 +78,20 @@ gen_ver_number <- function(path) {
 # this will allow us to load via yaml and validate it through dataclass which will confirm all the fields are valid and we return the config obj. 
 
 #-------------------------------
-# read config function
+# read config function - reads config from YAML file
+# Can override default path using TEST_CONFIG_PATH environment variable
 #-------------------------------
-read_config <- function(file_path) {
+read_config <- function(file_path = NULL) {
+  # Check for environment variable first (for parallel testing)
+  test_config <- Sys.getenv("TEST_CONFIG_PATH", unset = "")
+  if (test_config != "") {
+    file_path <- test_config
+    cat("Using test config from environment:", file_path, "\n")
+  } else if (is.null(file_path)) {
+    # If no env var and no path provided, use default
+    file_path <- paste0(getwd(), "/01_code/02_analysis/model_config.yaml")
+  }
+  # If file_path was provided explicitly and no env var, use the provided path
 
   # Read in YAML file -------------------------------
   config <- yaml::read_yaml(file_path)
@@ -294,22 +305,61 @@ run_tuning <- function(combination, grid_params, train_test_params, global_seed,
     ## model tuning------------------------------
     tune_results_phxgb_seed <- gen_seed(global_seed, c(enc, exposure, cause, "tune_results_phxgb"))
     set.seed(tune_results_phxgb_seed)
-    suppressWarnings({ suppressMessages({
-      tune_results_phxgb <- wflw_phxgb_tune |>
-        tune_grid( # try: tune_bayes
-          resamples = resamples_kfold,
-          grid = grid_phxgb_tune,
-          control = control_grid(
-            verbose = FALSE,
-            allow_par = FALSE,
-            save_pred = TRUE,
-            save_workflow = TRUE,
-            event_level = "first",
-            pkgs = c("tidymodels", "modeltime", "timetk")
-          ),
-          metrics = metric_set(yardstick::rmse, yardstick::rsq)
-        )
-    })}) # this needs a seed 
+    
+    # Retry logic for tune_grid to handle XGBoost precision issues
+    max_retries <- 3
+    retry_count <- 0
+    tune_results_phxgb <- NULL
+    
+    while (is.null(tune_results_phxgb) && retry_count < max_retries) {
+      tryCatch({
+        suppressWarnings({ suppressMessages({
+          tune_results_phxgb <- wflw_phxgb_tune |>
+            tune_grid( # try: tune_bayes
+              resamples = resamples_kfold,
+              grid = grid_phxgb_tune,
+              control = control_grid(
+                verbose = FALSE,
+                allow_par = FALSE,
+                save_pred = TRUE,
+                save_workflow = TRUE,
+                event_level = "first",
+                pkgs = c("tidymodels", "modeltime", "timetk")
+              ),
+              metrics = metric_set(yardstick::rmse, yardstick::rsq)
+            )
+        })})
+        
+        # If we get here, tuning succeeded
+        if (!is.null(tune_results_phxgb)) {
+          break
+        }
+        
+      }, error = function(e) {
+        error_msg <- as.character(e)
+        retry_count <<- retry_count + 1
+        
+        # Check if it's the XGBoost precision error
+        if (grepl("Inconsistent.*best_score", error_msg) || grepl("finalizer", error_msg)) {
+          cat("  Warning: XGBoost precision error on attempt", retry_count, "- retrying...\n")
+          if (retry_count < max_retries) {
+            # Force garbage collection and wait a bit
+            gc(verbose = FALSE)
+            Sys.sleep(2)
+          } else {
+            cat("  Error: Max retries reached for tune_grid. This combination may fail.\n")
+            stop(paste("Failed after", max_retries, "retries:", error_msg))
+          }
+        } else {
+          # Different error - don't retry
+          stop(error_msg)
+        }
+      })
+    }
+    
+    if (is.null(tune_results_phxgb)) {
+      stop("Failed to complete tune_grid after all retries")
+    } # this needs a seed 
         
     # pull best params of model based on RMSE------------------------------
     best_params <- tune_results_phxgb |> select_best(metric = "rmse")

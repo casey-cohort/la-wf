@@ -15,7 +15,6 @@
 
 #-------------------------------
 # setup
-# rm(list = ls())
 pacman::p_load(modeltime, tidymodels, tidyverse, timetk, Metrics,
                tictoc, digest, yaml, arrow, future, furrr, progressr)
 
@@ -23,7 +22,7 @@ pacman::p_load(modeltime, tidymodels, tidyverse, timetk, Metrics,
 source(paste0(getwd(), "/01_code/paths.R"))
 source(paste0(getwd(), "/01_code/utils.R"))
 
-# read config first to get model count and n_sim_mbb
+# read config (TEST_CONFIG_PATH env var will override if set for parallel testing)
 config <- read_config(paste0(path_repo, "01_code/02_analysis/model_config.yaml"))
 
 # count number of models to run
@@ -52,11 +51,18 @@ train_test_date <- max(list.dirs(paste0(path_onedrive, "01_data/02_processed/tra
 
 #------------------------------
 # Set up parallel processing
-n_cores <- floor(parallel::detectCores() - 2) # leave 2 cores free
-cat("Using", n_cores, "cores out of", parallel::detectCores(), "available\n")
+# check if running as part of parallel tests (environment variable set)
+test_cores <- Sys.getenv("TEST_CORES_PER_TEST", unset = "")
+if (test_cores != "") {
+  n_cores <- as.numeric(test_cores)
+  cat("Running as parallel test - using", n_cores, "cores per test\n")
+} else {
+  n_cores <- floor(parallel::detectCores() - 2) # leave 2 cores free for normal runs
+  cat("Using", n_cores, "cores out of", parallel::detectCores(), "available\n")
+}
 plan(multisession, workers = n_cores)
 
-# Monitor memory usage (this is for macs)
+# monitor memory usage (this is for macs)
 tryCatch({
   mem_info <- system("sysctl hw.memsize", intern = TRUE)
   mem_bytes <- as.numeric(gsub("hw.memsize: ", "", mem_info))
@@ -66,7 +72,7 @@ tryCatch({
 })
 
 #------------------------------
-# Prepare combinations and estimate runtime
+# prepare combinations and estimate runtime
 all_combinations <- config$models_to_run_flat %>%
   map_dfr(~data.frame(
     encounter_type = .x$encounter_type,
@@ -75,10 +81,10 @@ all_combinations <- config$models_to_run_flat %>%
   ))
 
 cat("Total combinations to process:", nrow(all_combinations), "\n")
-cat("Estimated runtime:", round(nrow(all_combinations) * 4 / 60 / n_cores, 1), "hours\n")
+cat("Estimated runtime:", round(nrow(all_combinations) * 4 / 60 / n_cores, 1), "hours\n") # this is a pretty crude estimate, maybe not worth having here? 
 
 #------------------------------
-# Process model tuning in batches with progress monitoring
+# process model tuning in batches with progress monitoring
 batch_size <- n_cores * 2
 n_batches <- ceiling(nrow(all_combinations) / batch_size)
 all_combination_results <- list()
@@ -121,13 +127,13 @@ for (batch in 1:n_batches) {
   
   all_combination_results <- c(all_combination_results, batch_results)
   
-  # Save intermediate results
+  # save intermediate results
   save(all_combination_results, 
        file = paste0(path_onedrive, "02_output/", folder_name, "intermediate_results_batch_", batch, "_", mod_ver_suffix, ".RData"))
 
   cat("Completed", length(all_combination_results), "of", nrow(all_combinations), "combinations\n")
   
-  # Memory cleanup every few batches
+  # memory cleanup every few batches
   if (batch %% 3 == 0) gc()
 }
 
@@ -258,6 +264,7 @@ config_expanded$assess_split <- config$train_test_params$assess_split
 config_expanded$assess_cv <- config$train_test_params$assess_cv
 config_expanded$skip_cv <- config$train_test_params$skip_cv
 config_expanded$slice_limit_cv <- config$train_test_params$slice_limit_cv
+config_expanded$model_description <- config$model_description
 
 if (!is.null(all_metrics) && nrow(all_metrics) > 0) {
   # join with config params first
@@ -272,9 +279,8 @@ if (!is.null(all_metrics) && nrow(all_metrics) > 0) {
 }
 
 #------------------------------
-# lastly, generate model description and order columns
+# lastly, order columns
 if (!is.null(all_metrics) && nrow(all_metrics) > 0) {
-  all_metrics <- all_metrics %>% mutate(model_description = "insert changes since last run here")
 
   # and order cols 
   all_metrics <- all_metrics %>%
@@ -309,5 +315,10 @@ if (!is.null(all_metrics) && nrow(all_metrics) > 0) {
   cat("No performance metrics to save\n")
 }
 
+# Save output directory path for subsequent scripts (MBB, outputs)
+output_dir_full <- paste0(path_onedrive, "02_output/model_run_", mod_ver_suffix)
+Sys.setenv(MODEL_OUTPUT_DIR = output_dir_full)
+
 cat("\nProcessing complete!\n")
 cat("Results saved with timestamp:", mod_ver_suffix, "\n")
+cat("Output directory:", output_dir_full, "\n")

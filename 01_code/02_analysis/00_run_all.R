@@ -54,6 +54,8 @@ run_timed_step <- function(step_num, step_name, script_path, ...) {
 }
 
 # Setup ----
+source(paste0(getwd(), "/01_code/paths.R"))
+source(paste0(getwd(), "/01_code/utils.R"))
 
 # Helper function to get user input in both interactive and terminal modes
 get_user_input <- function(prompt_text) {

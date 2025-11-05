@@ -24,7 +24,7 @@ models_to_run:
 #     cause: "num_enc_cardio"
 
 grid_params:
-  mtry: [3, 10]
+  mtry: [10, 20]
   min_n: [5, 30]
   tree_depth: [3, 8]
   learn_rate: [0.01, 0.1]
@@ -39,7 +39,10 @@ train_test_params:
 # can give a list of combinations so we can try many things -- so maybe increments of 5 and all combos.
 
 # Number of moving block bootstrap simulations for confidence intervals
-n_sim_mbb: 100
+n_sim_mbb: 50
+
+# model description
+model_description: "changed mtry range from [7,12] to [10, 20] + reduced n_sim_mbb to 50 for runtime"
 
 
 # For later, we want to be able to have different sets of params run
