@@ -110,9 +110,9 @@ for (batch in 1:n_batches) {
       future_map(~{
         combination <- list(
           encounter_type = .x$encounter_type,
-        exposure_category = .x$exposure_category,
-        cause = .x$cause
-      )
+          exposure_category = .x$exposure_category,
+          cause = .x$cause
+        )
       result <- run_tuning(combination,
                 config$grid_params,
                 config$train_test_params,
@@ -300,15 +300,15 @@ if (!is.null(all_metrics) && nrow(all_metrics) > 0) {
 #------------------------------
 # save final results
 save(all_results, 
-     file = paste0(path_onedrive, "02_output/model_run_", mod_ver_suffix, "/all_results_nested_", mod_ver_suffix, ".RData"))
+     file = paste0(path_onedrive, "02_output/", folder_name, "all_results_nested_", mod_ver_suffix, ".RData"))
 
 save(all_combination_results, 
-     file = paste0(path_onedrive, "02_output/model_run_", mod_ver_suffix, "/all_results_with_errors_flat_", mod_ver_suffix, ".RData"))
+     file = paste0(path_onedrive, "02_output/", folder_name, "all_results_with_errors_flat_", mod_ver_suffix, ".RData"))
 
 # save performance metrics
 if (!is.null(all_metrics) && nrow(all_metrics) > 0) {
   write.csv(all_metrics, 
-            paste0(path_onedrive, "02_output/model_run_", mod_ver_suffix, "/performance_metrics_", mod_ver_suffix, ".csv"), 
+            paste0(path_onedrive, "02_output/", folder_name, "performance_metrics_", mod_ver_suffix, ".csv"), 
             row.names = FALSE)
   cat("Performance metrics saved successfully\n")
 } else {
@@ -316,7 +316,7 @@ if (!is.null(all_metrics) && nrow(all_metrics) > 0) {
 }
 
 # Save output directory path for subsequent scripts (MBB, outputs)
-output_dir_full <- paste0(path_onedrive, "02_output/model_run_", mod_ver_suffix)
+output_dir_full <- paste0(path_onedrive, "02_output/", folder_name)
 Sys.setenv(MODEL_OUTPUT_DIR = output_dir_full)
 
 cat("\nProcessing complete!\n")
