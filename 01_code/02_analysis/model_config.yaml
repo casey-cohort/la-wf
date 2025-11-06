@@ -24,7 +24,7 @@ models_to_run:
 #     cause: "num_enc_cardio"
 
 grid_params:
-  mtry: [10, 20]
+  mtry: [10, 32]
   min_n: [5, 30]
   tree_depth: [3, 8]
   learn_rate: [0.01, 0.1]

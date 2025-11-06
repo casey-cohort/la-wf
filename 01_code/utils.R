@@ -382,7 +382,7 @@ run_tuning <- function(combination, grid_params, train_test_params, global_seed,
   }, error = function(e) {
     return(list(
       error = as.character(e),
-      enc_type = combination$enc_type,
+      enc_type = combination$encounter_type,
       exposure_category = combination$exposure_category,
       cause = combination$cause,
       success = FALSE
