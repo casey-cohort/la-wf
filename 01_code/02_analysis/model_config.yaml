@@ -13,7 +13,7 @@ models_to_run:
   encounter_type: ["IP", "ED"]
   exposure_category: ["evac", "high_smoke", "mid_smoke", "none"]
   cause: ["num_enc", "num_enc_resp", "num_enc_cardio", "num_enc_injury", "num_enc_neuro"]
-
+  
 # OPTION 2: Currently active (comment out to use models_to_run instead)
 # models_to_run_flat:
 #   - encounter_type: "IP"
@@ -24,25 +24,59 @@ models_to_run:
 #     cause: "num_enc_cardio"
 
 grid_params:
-  mtry: [10, 32]
-  min_n: [5, 30]
-  tree_depth: [3, 8]
-  learn_rate: [0.01, 0.1]
-  loss_reduction: [-5, 1]
-  stop_iter: [10, 50]
+  # XGBoost parameters - more conservative to reduce overfitting
+  mtry:
+    range: [10, 32]
+    tune: true
+  min_n:
+    range: [5, 30]
+    tune: true
+  tree_depth:
+    range: [3, 8]
+    tune: true
+  learn_rate:
+    range: [0.01, 0.1]
+    tune: true
+  loss_reduction:
+    range: [-5, 1]
+    tune: true
+  stop_iter:
+    range: [10, 50]
+    tune: true
+  # New XGBoost parameters for regularization
+  trees:
+    range: [8, 25] # default is 15
+    tune: true
+  sample_size:
+    range: [0.6, 1.0] # default is 1
+    tune: true
+  # Prophet changepoint parameters for trend regularization
+  changepoint_num:
+    range: [18, 28] # default is 25
+    tune: false
+  changepoint_range:
+    range: [0.6, 0.9] # default is 0.8
+    tune: false
+  prior_scale_changepoints:
+    range: [0.05, 0.05] # default is 0.05
+    tune: false
 
 train_test_params: 
   assess_split: "67 days"
-  assess_cv: "30 days"
-  skip_cv: "7 days"
-  slice_limit_cv: 5
+  assess_cv: "45 days"
+  skip_cv: "14 days"
+  slice_limit_cv: 8
+  holdout_date: "2025-01-06"  # Dates after this are considered holdout period
 # can give a list of combinations so we can try many things -- so maybe increments of 5 and all combos.
 
 # Number of moving block bootstrap simulations for confidence intervals
-n_sim_mbb: 50
+n_sim_mbb: 100
+
+# Number of CPU cores to leave free (used by both tuning and MBB scripts)
+cores_to_leave_out: 2
 
 # model description
-model_description: "changed mtry range from [7,12] to [10, 20] + reduced n_sim_mbb to 50 for runtime"
+model_description: "Balanced hyperparameters"
 
 
 # For later, we want to be able to have different sets of params run

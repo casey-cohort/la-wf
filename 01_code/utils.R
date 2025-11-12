@@ -265,17 +265,28 @@ run_tuning <- function(combination, grid_params, train_test_params, global_seed,
     
     ## specify models------------------------------
     model_phxgb_tune_seed <- gen_seed(global_seed, c(enc, exposure, cause, "model_phxgb_tune"))
-    model_phxgb_tune <- prophet_boost(
+    
+    # Build model arguments conditionally based on tune flag
+    model_args <- list(
       mode = "regression",
       growth = "linear",
-      seasonality_yearly = FALSE,
-      mtry = tune(),
-      min_n = tune(),
-      tree_depth = tune(),
-      learn_rate = tune(),
-      loss_reduction = tune(),
-      stop_iter = tune()
-    ) |>
+      seasonality_yearly = FALSE
+    )
+    
+    # Add parameters conditionally - only include if tune: true
+    if (isTRUE(grid_params$mtry$tune)) model_args$mtry <- tune()
+    if (isTRUE(grid_params$trees$tune)) model_args$trees <- tune()
+    if (isTRUE(grid_params$min_n$tune)) model_args$min_n <- tune()
+    if (isTRUE(grid_params$tree_depth$tune)) model_args$tree_depth <- tune()
+    if (isTRUE(grid_params$learn_rate$tune)) model_args$learn_rate <- tune()
+    if (isTRUE(grid_params$loss_reduction$tune)) model_args$loss_reduction <- tune()
+    if (isTRUE(grid_params$stop_iter$tune)) model_args$stop_iter <- tune()
+    if (isTRUE(grid_params$sample_size$tune)) model_args$sample_size <- tune()
+    if (isTRUE(grid_params$changepoint_num$tune)) model_args$changepoint_num <- tune()
+    if (isTRUE(grid_params$changepoint_range$tune)) model_args$changepoint_range <- tune()
+    if (isTRUE(grid_params$prior_scale_changepoints$tune)) model_args$prior_scale_changepoints <- tune()
+    
+    model_phxgb_tune <- do.call(prophet_boost, model_args) |>
       set_engine("prophet_xgboost",
                  seed = model_phxgb_tune_seed,
                  early_stop = TRUE,
@@ -284,18 +295,26 @@ run_tuning <- function(combination, grid_params, train_test_params, global_seed,
     # generate grid for tuning------------------------------
     grid_phxgb_tune_seed <- gen_seed(global_seed, c(enc, exposure, cause, "grid_phxgb_tune"))
     set.seed(grid_phxgb_tune_seed)
-    grid_phxgb_tune <- grid_space_filling(
-      extract_parameter_set_dials(model_phxgb_tune) |>
-        update(
-          mtry = mtry(range = grid_params$mtry),
-          min_n = min_n(range = grid_params$min_n),
-          tree_depth = tree_depth(range = grid_params$tree_depth),
-          learn_rate = learn_rate(range = grid_params$learn_rate),
-          loss_reduction = loss_reduction(range = grid_params$loss_reduction, trans = log10_trans()),
-          stop_iter = stop_iter(range = grid_params$stop_iter)
-        ),
-      size = 100
-    )
+    
+    # Build grid update arguments conditionally - only include parameters with tune: true
+    grid_update_args <- list()
+    if (isTRUE(grid_params$mtry$tune)) grid_update_args$mtry <- mtry(range = grid_params$mtry$range)
+    if (isTRUE(grid_params$trees$tune)) grid_update_args$trees <- trees(range = grid_params$trees$range)
+    if (isTRUE(grid_params$min_n$tune)) grid_update_args$min_n <- min_n(range = grid_params$min_n$range)
+    if (isTRUE(grid_params$tree_depth$tune)) grid_update_args$tree_depth <- tree_depth(range = grid_params$tree_depth$range)
+    if (isTRUE(grid_params$learn_rate$tune)) grid_update_args$learn_rate <- learn_rate(range = grid_params$learn_rate$range)
+    if (isTRUE(grid_params$loss_reduction$tune)) grid_update_args$loss_reduction <- loss_reduction(range = grid_params$loss_reduction$range, trans = log10_trans())
+    if (isTRUE(grid_params$stop_iter$tune)) grid_update_args$stop_iter <- stop_iter(range = grid_params$stop_iter$range)
+    if (isTRUE(grid_params$sample_size$tune)) grid_update_args$sample_size <- sample_prop(range = grid_params$sample_size$range)
+    if (isTRUE(grid_params$changepoint_num$tune)) grid_update_args$changepoint_num <- changepoint_num(range = grid_params$changepoint_num$range)
+    if (isTRUE(grid_params$changepoint_range$tune)) grid_update_args$changepoint_range <- changepoint_range(range = grid_params$changepoint_range$range)
+    if (isTRUE(grid_params$prior_scale_changepoints$tune)) grid_update_args$prior_scale_changepoints <- prior_scale_changepoints(range = grid_params$prior_scale_changepoints$range, trans = log10_trans())
+    
+    param_set <- extract_parameter_set_dials(model_phxgb_tune)
+    if (length(grid_update_args) > 0) {
+      param_set <- do.call(update, c(list(param_set), grid_update_args))
+    }
+    grid_phxgb_tune <- grid_space_filling(param_set, size = 200)
     
     ## workflow for tuning------------------------------
     wflw_phxgb_tune <- workflow() |>
