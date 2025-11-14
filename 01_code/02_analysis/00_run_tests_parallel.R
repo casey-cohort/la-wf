@@ -29,10 +29,10 @@ test_configs <- list(
     description = "Test: mtry range [16,30] and min_n [1,40] and tree_depth [2,10] and stop_iter [15,60]",
     modifications = list(
       grid_params = list(
-        min_n = c(1,40),
-        tree_depth = c(2, 10),
-        stop_iter = c(15, 60),
-        mtry = c(16, 30)
+        min_n = list(range = c(1,40), tune = TRUE),
+        tree_depth = list(range = c(2, 10), tune = TRUE),
+        stop_iter = list(range = c(15, 60), tune = TRUE),
+        mtry = list(range = c(16, 30), tune = TRUE)
         # min_n, tree_depth, learn_rate, loss_reduction, stop_iter will use base config values
       )
     )
@@ -44,10 +44,10 @@ test_configs <- list(
     description = "Test: mtry range [16,30] and min_n [10,40] and tree_depth [2,10] and stop_iter [15,60]",
     modifications = list(
       grid_params = list(
-        min_n = c(10,40),
-        tree_depth = c(1, 10),
-        stop_iter = c(15, 60),
-        mtry = c(16, 30)
+        min_n = list(range = c(10,40), tune = TRUE),
+        tree_depth = list(range = c(1, 10), tune = TRUE),
+        stop_iter = list(range = c(15, 60), tune = TRUE),
+        mtry = list(range = c(16, 30), tune = TRUE)
       )
     )
   )
@@ -86,7 +86,15 @@ apply_config_modifications <- function(base_config, modifications) {
   # apply modifications
   for (key in names(modifications)) {
     if (is.list(modifications[[key]]) && key %in% names(modified_config)) {
-      modified_config[[key]] <- modifyList(modified_config[[key]], modifications[[key]])
+      # Special handling for grid_params to merge nested structure properly
+      if (key == "grid_params") {
+        # Merge grid_params at the parameter level (e.g., mtry, trees, etc.)
+        for (param_name in names(modifications[[key]])) {
+          modified_config[[key]][[param_name]] <- modifications[[key]][[param_name]]
+        }
+      } else {
+        modified_config[[key]] <- modifyList(modified_config[[key]], modifications[[key]])
+      }
     } else {
       modified_config[[key]] <- modifications[[key]]
     }

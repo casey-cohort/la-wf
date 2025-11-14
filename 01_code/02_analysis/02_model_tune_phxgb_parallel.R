@@ -57,8 +57,10 @@ if (test_cores != "") {
   n_cores <- as.numeric(test_cores)
   cat("Running as parallel test - using", n_cores, "cores per test\n")
 } else {
-  n_cores <- floor(parallel::detectCores() - 2) # leave 2 cores free for normal runs
-  cat("Using", n_cores, "cores out of", parallel::detectCores(), "available\n")
+  # Use cores_to_leave_out from config (default: 2 if not specified)
+  cores_to_leave_out <- ifelse(is.null(config$cores_to_leave_out), 2, config$cores_to_leave_out)
+  n_cores <- max(1, floor(parallel::detectCores() - cores_to_leave_out))
+  cat("Using", n_cores, "cores out of", parallel::detectCores(), "available (leaving", cores_to_leave_out, "cores free)\n")
 }
 plan(multisession, workers = n_cores)
 
@@ -227,8 +229,14 @@ best_params_df <- list()
 for (i in seq_along(successful_results)) {
   result <- successful_results[[i]]
   if (!is.null(result$best_params)) {
-    best_params_row <- result$best_params %>%
-      select(mtry, min_n, tree_depth, learn_rate, loss_reduction, stop_iter) %>%
+      # Only select columns that exist (parameters that were tuned)
+      param_cols <- c("mtry", "trees", "min_n", "tree_depth", "learn_rate", "loss_reduction", 
+                     "stop_iter", "sample_size", "changepoint_num", "changepoint_range", 
+                     "prior_scale_changepoints")
+      existing_cols <- intersect(param_cols, names(result$best_params))
+      
+      best_params_row <- result$best_params %>%
+      select(any_of(existing_cols)) %>%
       mutate(
         enc_type = result$enc_type,
         exposure_category = result$exposure_category,
@@ -254,12 +262,17 @@ config_expanded <- config$models_to_run_flat %>%
         cause = .x$cause
       ))
 
-config_expanded$mtry_range <- paste0("[", config$grid_params$mtry[1], ", ", config$grid_params$mtry[2], "]")
-config_expanded$min_n_range <- paste0("[", config$grid_params$min_n[1], ", ", config$grid_params$min_n[2], "]")
-config_expanded$tree_depth_range <- paste0("[", config$grid_params$tree_depth[1], ", ", config$grid_params$tree_depth[2], "]")
-config_expanded$learn_rate_range <- paste0("[", config$grid_params$learn_rate[1], ", ", config$grid_params$learn_rate[2], "]")
-config_expanded$loss_reduction_range <- paste0("[", config$grid_params$loss_reduction[1], ", ", config$grid_params$loss_reduction[2], "]")
-config_expanded$stop_iter_range <- paste0("[", config$grid_params$stop_iter[1], ", ", config$grid_params$stop_iter[2], "]")
+config_expanded$mtry_range <- paste0("[", config$grid_params$mtry$range[1], ", ", config$grid_params$mtry$range[2], "]")
+config_expanded$trees_range <- paste0("[", config$grid_params$trees$range[1], ", ", config$grid_params$trees$range[2], "]")
+config_expanded$min_n_range <- paste0("[", config$grid_params$min_n$range[1], ", ", config$grid_params$min_n$range[2], "]")
+config_expanded$tree_depth_range <- paste0("[", config$grid_params$tree_depth$range[1], ", ", config$grid_params$tree_depth$range[2], "]")
+config_expanded$learn_rate_range <- paste0("[", config$grid_params$learn_rate$range[1], ", ", config$grid_params$learn_rate$range[2], "]")
+config_expanded$loss_reduction_range <- paste0("[", config$grid_params$loss_reduction$range[1], ", ", config$grid_params$loss_reduction$range[2], "]")
+config_expanded$stop_iter_range <- paste0("[", config$grid_params$stop_iter$range[1], ", ", config$grid_params$stop_iter$range[2], "]")
+config_expanded$sample_size_range <- paste0("[", config$grid_params$sample_size$range[1], ", ", config$grid_params$sample_size$range[2], "]")
+config_expanded$changepoint_num_range <- paste0("[", config$grid_params$changepoint_num$range[1], ", ", config$grid_params$changepoint_num$range[2], "]")
+config_expanded$changepoint_range_range <- paste0("[", config$grid_params$changepoint_range$range[1], ", ", config$grid_params$changepoint_range$range[2], "]")
+config_expanded$prior_scale_changepoints_range <- paste0("[", config$grid_params$prior_scale_changepoints$range[1], ", ", config$grid_params$prior_scale_changepoints$range[2], "]")
 config_expanded$assess_split <- config$train_test_params$assess_split
 config_expanded$assess_cv <- config$train_test_params$assess_cv
 config_expanded$skip_cv <- config$train_test_params$skip_cv
@@ -282,16 +295,22 @@ if (!is.null(all_metrics) && nrow(all_metrics) > 0) {
 # lastly, order columns
 if (!is.null(all_metrics) && nrow(all_metrics) > 0) {
 
-  # and order cols 
+  # and order cols - use any_of() to handle missing columns gracefully
   all_metrics <- all_metrics %>%
     select(enc_type, exposure_category, cause, model_description, 
-           # hyperparameter tuning ranges and their corresponding best values
-           mtry_range, mtry,
-           min_n_range, min_n,
-           tree_depth_range, tree_depth,
-           learn_rate_range, learn_rate,
-           loss_reduction_range, loss_reduction,
-           stop_iter_range, stop_iter,
+           # XGBoost hyperparameter tuning ranges and their corresponding best values
+           any_of(c("mtry_range", "mtry",
+                    "trees_range", "trees",
+                    "min_n_range", "min_n",
+                    "tree_depth_range", "tree_depth",
+                    "learn_rate_range", "learn_rate",
+                    "loss_reduction_range", "loss_reduction",
+                    "stop_iter_range", "stop_iter",
+                    "sample_size_range", "sample_size",
+                    # Prophet changepoint parameters
+                    "changepoint_num_range", "changepoint_num",
+                    "changepoint_range_range", "changepoint_range",
+                    "prior_scale_changepoints_range", "prior_scale_changepoints")),
            # assess/skip parameters
            assess_split, assess_cv, skip_cv, slice_limit_cv, 
            everything())

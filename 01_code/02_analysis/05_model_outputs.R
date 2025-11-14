@@ -97,6 +97,28 @@ if (length(mbb_results) == 0) {
 }
 cat("\n")
 
+# Count total combinations and successful ones
+total_combos <- 0
+successful_combos <- 0
+for (enc in names(mbb_results)) {
+  for (exposure in names(mbb_results[[enc]])) {
+    for (cause in names(mbb_results[[enc]][[exposure]])) {
+      total_combos <- total_combos + 1
+      result <- mbb_results[[enc]][[exposure]][[cause]]
+      if (isTRUE(result$success)) {
+        successful_combos <- successful_combos + 1
+      }
+    }
+  }
+}
+cat("Total model combinations:", total_combos, "\n")
+cat("Successful MBB results:", successful_combos, "\n")
+if (successful_combos == 0) {
+  cat("WARNING: No successful MBB results found. No outputs will be generated.\n")
+  cat("Check MBB results for errors.\n\n")
+}
+cat("\n")
+
 for (enc in names(mbb_results)) {
   for (exposure in names(mbb_results[[enc]])) {
     for (cause in names(mbb_results[[enc]][[exposure]])) {
@@ -106,7 +128,11 @@ for (enc in names(mbb_results)) {
       
       # Skip if not successful
       if (!isTRUE(result$success)) {
-        cat("  Skipping - MBB was not successful\n\n")
+        cat("  Skipping - MBB was not successful\n")
+        if (!is.null(result$error)) {
+          cat("  Error:", result$error, "\n")
+        }
+        cat("\n")
         next
       }
       
@@ -210,9 +236,19 @@ for (enc in names(mbb_results)) {
           ) %>%
           mutate(count = !!sym(cause))
         
+        # Extract date ranges for plot titles
+        train_date_range <- paste0(
+          format(min(df_train_vis$date, na.rm = TRUE), "%b %d, %Y"), " - ",
+          format(max(df_train_vis$date, na.rm = TRUE), "%b %d, %Y")
+        )
+        test_date_range <- paste0(
+          format(min(df_test_vis$date, na.rm = TRUE), "%b %d, %Y"), " - ",
+          format(max(df_test_vis$date, na.rm = TRUE), "%b %d, %Y")
+        )
+        
         # Create plots
-        p1 <- create_fit_plot(df_train_vis, "A) Training (fit)")
-        p2 <- create_fit_plot(df_test_vis, "B) Test (forecast with MBB CIs)")
+        p1 <- create_fit_plot(df_train_vis, paste0("A) Training (fit) (", train_date_range, ")"))
+        p2 <- create_fit_plot(df_test_vis, paste0("B) Test (forecast with MBB CIs) (", test_date_range, ")"))
         
         # Add holdout plot if available
         if (!is.null(holdout_MBB) && nrow(holdout_df) > 0) {
@@ -229,14 +265,18 @@ for (enc in names(mbb_results)) {
           p_combined <- (p1 / p2 / p3) +
             plot_annotation(
               title = paste0("Prophet + XGBoost: ", enc, " - ", exposure, " - ", cause),
-              subtitle = paste0("Block length = ", result$L_block, " days, n_sim = ", result$n_sim)
+              subtitle = paste0("Block length = ", result$L_block, " days, n_sim = ", result$n_sim, 
+                               ", MAPE = ", round(test_metrics$mape, 2), 
+                               ", R² = ", test_metrics$r2)
             )
         } else {
           # Only train and test
           p_combined <- (p1 / p2) +
             plot_annotation(
               title = paste0("Prophet + XGBoost: ", enc, " - ", exposure, " - ", cause),
-              subtitle = paste0("Block length = ", result$L_block, " days, n_sim = ", result$n_sim)
+              subtitle = paste0("Block length = ", result$L_block, " days, n_sim = ", result$n_sim, 
+                               ", MAPE = ", round(test_metrics$mape, 2), 
+                               ", R² = ", test_metrics$r2)
             )
         }
         
@@ -329,6 +369,7 @@ for (enc in names(mbb_results)) {
         cat("    Traceback:\n")
         print(traceback())
         cat("\n")
+        # Continue processing other combinations even if one fails
       })
     }
   }
@@ -339,6 +380,8 @@ for (enc in names(mbb_results)) {
 # ============================================================
 
 cat("\n=== Saving Combined Outputs ===\n")
+cat("Number of metrics dataframes collected:", length(all_metrics_list), "\n")
+cat("Number of excess hospitalization dataframes collected:", length(all_excess_list), "\n\n")
 
 # Save combined metrics
 if (length(all_metrics_list) > 0) {
@@ -346,6 +389,9 @@ if (length(all_metrics_list) > 0) {
   metrics_file <- paste0(tables_dir, "performance_metrics_with_mbb_", mod_ver_suffix, ".csv")
   write.csv(all_metrics, metrics_file, row.names = FALSE)
   cat("Combined metrics saved to:", metrics_file, "\n")
+  cat("  Rows:", nrow(all_metrics), "\n")
+} else {
+  cat("WARNING: No metrics were collected. No metrics file will be saved.\n")
 }
 
 # Save combined excess hospitalizations
@@ -354,6 +400,7 @@ if (length(all_excess_list) > 0) {
   excess_file <- paste0(tables_dir, "excess_hospitalizations_all_", mod_ver_suffix, ".csv")
   write.csv(all_excess, excess_file, row.names = FALSE)
   cat("Combined excess hospitalizations saved to:", excess_file, "\n")
+  cat("  Rows:", nrow(all_excess), "\n")
   
   # Create HTML table for summary (total period only)
   excess_summary <- all_excess %>%
@@ -386,6 +433,9 @@ if (length(all_excess_list) > 0) {
   excess_html <- paste0(tables_dir, "excess_hospitalizations_summary_", mod_ver_suffix, ".html")
   gtsave(gt_excess, excess_html)
   cat("Excess hospitalizations HTML table saved to:", excess_html, "\n")
+} else {
+  cat("WARNING: No excess hospitalization data was collected. No excess file will be saved.\n")
+  cat("  (This is normal if there are no holdout periods in the data)\n")
 }
 
 cat("\n=== Output Generation Complete! ===\n")

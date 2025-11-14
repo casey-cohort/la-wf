@@ -8,7 +8,7 @@ cat("STARTING 04_model_mbb_cis.R\n")
 cat("========================================\n\n")
 
 # Setup ----
-pacman::p_load(tidymodels, modeltime, tidyverse, timetk, arrow, boot, tictoc)
+pacman::p_load(tidymodels, modeltime, tidyverse, timetk, arrow, boot, tictoc, future, furrr, progressr, parallel)
 
 # Set paths and source utilities
 source(paste0(getwd(), "/01_code/paths.R"))
@@ -34,6 +34,22 @@ seed <- 123
 cat("MBB Parameters:\n")
 cat("  Number of simulations:", n_sim, "\n")
 cat("  Block length:", L_block, "days\n\n")
+
+#------------------------------
+# Set up parallel processing for MBB
+#------------------------------
+# Check if running as part of parallel tests (environment variable set)
+test_cores <- Sys.getenv("TEST_CORES_PER_TEST", unset = "")
+if (test_cores != "") {
+  n_cores_mbb <- as.numeric(test_cores)
+  cat("Running as parallel test - using", n_cores_mbb, "cores for MBB\n")
+} else {
+  # Use cores_to_leave_out from config (default: 2 if not specified)
+  cores_to_leave_out <- ifelse(is.null(config$cores_to_leave_out), 2, config$cores_to_leave_out)
+  n_cores_mbb <- max(1, floor(parallel::detectCores() - cores_to_leave_out))
+  cat("Using", n_cores_mbb, "cores for MBB out of", parallel::detectCores(), "available (leaving", cores_to_leave_out, "cores free)\n")
+}
+plan(multisession, workers = n_cores_mbb)
 
 # Find latest model results ----
 # Use new folder naming pattern: model_run_YYYY-MM-DD.v###_x##_sim###
@@ -142,17 +158,18 @@ for (enc in names(all_results)) {
           dplyr::mutate(date = as.Date(date))
         
         # Create train/test/holdout splits
-        # Holdout: dates after 2025-01-06
+        # Holdout: dates after holdout_date from config
+        holdout_cutoff <- as.Date(config$train_test_params$holdout_date)
         df_holdout <- df_full %>% 
-          dplyr::filter(date > as.Date("2025-01-06"))
+          dplyr::filter(date > holdout_cutoff)
         
         df_train_test <- df_full %>%
-          dplyr::filter(date <= as.Date("2025-01-06"))
+          dplyr::filter(date <= holdout_cutoff)
         
         # Split train/test using same parameters as in tuning
         splits <- df_train_test %>%
           timetk::time_series_split(
-            assess = "75 days",
+            assess = config$train_test_params$assess_split,
             cumulative = TRUE,
             date_var = date
           )
@@ -178,20 +195,33 @@ for (enc in names(all_results)) {
         best_params <- result$best_params
         
         # Create model spec with best parameters
-        model_seed <- gen_seed(global_seed, c(enc, exposure, cause, "model_mbb"))
-        model_spec_mbb <- prophet_boost(
+        # Only include parameters that were tuned (exist in best_params)
+        # NOTE: Do NOT set seed in model spec for MBB - each bootstrap iteration 
+        # will use its own seed based on base_seed + iteration number
+        
+        # Build model arguments conditionally - only include parameters that were tuned
+        model_args_mbb <- list(
           mode = "regression",
           growth = "linear",
-          seasonality_yearly = FALSE,
-          mtry = best_params$mtry,
-          min_n = best_params$min_n,
-          tree_depth = best_params$tree_depth,
-          learn_rate = best_params$learn_rate,
-          loss_reduction = best_params$loss_reduction,
-          stop_iter = best_params$stop_iter
-        ) %>%
+          seasonality_yearly = FALSE
+        )
+        
+        # Add parameters only if they exist in best_params (i.e., were tuned)
+        if ("mtry" %in% names(best_params)) model_args_mbb$mtry <- best_params$mtry
+        if ("trees" %in% names(best_params)) model_args_mbb$trees <- best_params$trees
+        if ("min_n" %in% names(best_params)) model_args_mbb$min_n <- best_params$min_n
+        if ("tree_depth" %in% names(best_params)) model_args_mbb$tree_depth <- best_params$tree_depth
+        if ("learn_rate" %in% names(best_params)) model_args_mbb$learn_rate <- best_params$learn_rate
+        if ("loss_reduction" %in% names(best_params)) model_args_mbb$loss_reduction <- best_params$loss_reduction
+        if ("stop_iter" %in% names(best_params)) model_args_mbb$stop_iter <- best_params$stop_iter
+        if ("sample_size" %in% names(best_params)) model_args_mbb$sample_size <- best_params$sample_size
+        if ("changepoint_num" %in% names(best_params)) model_args_mbb$changepoint_num <- best_params$changepoint_num
+        if ("changepoint_range" %in% names(best_params)) model_args_mbb$changepoint_range <- best_params$changepoint_range
+        if ("prior_scale_changepoints" %in% names(best_params)) model_args_mbb$prior_scale_changepoints <- best_params$prior_scale_changepoints
+        
+        # Create model spec WITHOUT seed parameter (will be set per-iteration in parallel workers)
+        model_spec_mbb <- do.call(prophet_boost, model_args_mbb) %>%
           set_engine("prophet_xgboost",
-                     seed = model_seed,
                      early_stop = TRUE,
                      validation = 0.2)
         
@@ -329,4 +359,10 @@ for (enc in names(mbb_results)) {
 cat("\nSummary:\n")
 cat("  Successful MBB calculations:", successful, "\n")
 cat("  Failed calculations:", failed, "\n")
+
+#------------------------------
+# Close down parallel processing
+#------------------------------
+plan(sequential)
+
 cat("\nMBB confidence interval generation complete!\n")
