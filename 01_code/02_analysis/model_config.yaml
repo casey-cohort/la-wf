@@ -76,10 +76,10 @@ train_test_params:
 # can give a list of combinations so we can try many things -- so maybe increments of 5 and all combos.
 
 # Grid size for hyperparameter tuning
-grid_size: 200
+grid_size: 100
 
 # Number of moving block bootstrap simulations for confidence intervals
-n_sim_mbb: 500
+n_sim_mbb: 100
 
 # Block length (in days) for Moving Block Bootstrap
 block_length_mbb: 14
