@@ -8,28 +8,22 @@ cat("STARTING 04_model_mbb_cis.R\n")
 cat("========================================\n\n")
 
 # Setup ----
-pacman::p_load(tidymodels, modeltime, tidyverse, timetk, arrow, boot, tictoc, future, furrr, progressr, parallel)
+pacman::p_load(tidymodels, modeltime, tidyverse, timetk, arrow, boot, tictoc, future, furrr, progressr, parallel, withr)
 
 # Set paths and source utilities
 source(paste0(getwd(), "/01_code/paths.R"))
-source(paste0(getwd(), "/01_code/utils.R"))
+source(paste0(getwd(), "/01_code/utils_general.R"))
+source(paste0(getwd(), "/01_code/utils_tuning.R"))
 source(paste0(getwd(), "/01_code/utils_mbb.R"))
 
 # Read config to get n_sim_mbb
-# Try to read from TEST_CONFIG_PATH first (for parallel tests), then fall back to default
-test_config_path <- Sys.getenv("TEST_CONFIG_PATH", unset = "")
-if (test_config_path != "" && file.exists(test_config_path)) {
-  config <- read_config(test_config_path)
-  cat("Using test config from environment:", test_config_path, "\n")
-} else {
-  # Fall back to default config location
-  config <- read_config(paste0(getwd(), "/01_code/02_analysis/model_config.yaml"))
-}
+# read_config() automatically handles TEST_CONFIG_PATH environment variable
+config <- read_config(paste0(getwd(), "/01_code/02_analysis/model_config.yaml"))
 n_sim <- config$n_sim_mbb
 
 # Set MBB parameters
-L_block <- 14  # Block length (days)
-seed <- 123
+L_block <- config$block_length_mbb  # Block length (days)
+seed <- config$seed
 
 cat("MBB Parameters:\n")
 cat("  Number of simulations:", n_sim, "\n")
@@ -38,78 +32,42 @@ cat("  Block length:", L_block, "days\n\n")
 #------------------------------
 # Set up parallel processing for MBB
 #------------------------------
-# Check if running as part of parallel tests (environment variable set)
-test_cores <- Sys.getenv("TEST_CORES_PER_TEST", unset = "")
-if (test_cores != "") {
-  n_cores_mbb <- as.numeric(test_cores)
-  cat("Running as parallel test - using", n_cores_mbb, "cores for MBB\n")
-} else {
-  # Use cores_to_leave_out from config (default: 2 if not specified)
-  cores_to_leave_out <- ifelse(is.null(config$cores_to_leave_out), 2, config$cores_to_leave_out)
-  n_cores_mbb <- max(1, floor(parallel::detectCores() - cores_to_leave_out))
-  cat("Using", n_cores_mbb, "cores for MBB out of", parallel::detectCores(), "available (leaving", cores_to_leave_out, "cores free)\n")
-}
-plan(multisession, workers = n_cores_mbb)
+# Clear any lingering parallel plans from previous runs
+plan(sequential)
+# Set up parallel processing
+n_cores_mbb <- setup_parallel_processing(config)
+# Ensure parallel resources are cleaned up on exit (even if error occurs)
+on.exit(plan(sequential), add = TRUE)
 
 # Find latest model results ----
-# Use new folder naming pattern: model_run_YYYY-MM-DD.v###_x##_sim###
-find_latest_version <- function(output_path) {
-  output_dirs <- list.dirs(output_path, full.names = TRUE, recursive = FALSE)
-  # Filter by new pattern
-  pattern <- "^model_run_\\d{4}-\\d{2}-\\d{2}\\.v\\d{3}_x\\d+_sim\\d+$"
-  output_dirs <- output_dirs[grepl(pattern, basename(output_dirs))]
-  if (length(output_dirs) == 0) {
-    return(NULL)
-  }
-  latest_dir <- output_dirs[order(basename(output_dirs), decreasing = TRUE)][1]
-  return(latest_dir)
-}
+latest_dir <- get_output_directory(path_onedrive)
 
-# Check if output directory was set by tuning script (for parallel tests)
-output_dir_env <- Sys.getenv("MODEL_OUTPUT_DIR", unset = "")
-cat("MODEL_OUTPUT_DIR environment variable:", ifelse(output_dir_env == "", "(not set)", output_dir_env), "\n")
-
-if (output_dir_env != "" && dir.exists(output_dir_env)) {
-  latest_dir <- output_dir_env
-  cat("Using output directory from MODEL_OUTPUT_DIR environment variable:", latest_dir, "\n")
-} else {
-  cat("MODEL_OUTPUT_DIR not set or directory doesn't exist, falling back to find_latest_version()\n")
-  # Fall back to finding latest directory
-  latest_dir <- find_latest_version(paste0(path_onedrive, "02_output/"))
-  
-  if (is.null(latest_dir)) {
-    stop("No model output directories found. Please run 02_model_tune_phxgb_parallel.R first.")
-  }
-  
-  cat("Loading model results from:", latest_dir, "\n")
-}
-
-# Find the nested results file
-results_files <- list.files(latest_dir, pattern = "all_results_nested_.*\\.RData", full.names = TRUE)
-if (length(results_files) == 0) {
-  cat("ERROR: No nested results file found in:", latest_dir, "\n")
-  cat("Looking for pattern: all_results_nested_*.RData\n")
-  cat("Files in directory:\n")
-  print(list.files(latest_dir))
-  stop("No nested results file found in ", latest_dir)
-}
-results_file <- results_files[1]
-cat("Loading model results from:", results_file, "\n")
-
-# Load results
-load(results_file)
-cat("Results loaded successfully\n")
-cat("Number of encounter types in all_results:", length(all_results), "\n\n")
+# Load nested results
+all_results <- load_nested_results(latest_dir)
 
 # Load train/test data ----
-train_test_date <- max(list.dirs(paste0(path_onedrive, "01_data/02_processed/train_test/"), 
-                                  full.names = FALSE, recursive = FALSE))
-train_test_path <- paste0(path_onedrive, "01_data/02_processed/train_test/", train_test_date, "/")
-
+# Retrieve train/test date from environment variable set by tuning script
+train_test_date_env <- Sys.getenv("TRAIN_TEST_DATE")
+if (train_test_date_env == "") {
+  # Fallback: use most recent train/test data if env var not set
+  cat("Note: TRAIN_TEST_DATE environment variable not set. Finding most recent train/test data.\n")
+  base_path <- paste0(path_onedrive, "01_data/02_processed/train_test/")
+  available_dirs <- list.dirs(base_path, full.names = FALSE, recursive = FALSE)
+  # Filter for YYYY-MM-DD format and sort to get most recent
+  date_dirs <- available_dirs[grepl("^\\d{4}-\\d{2}-\\d{2}$", available_dirs)]
+  if (length(date_dirs) == 0) {
+    stop("ERROR: No train/test data directories found in: ", base_path)
+  }
+  most_recent_date <- sort(date_dirs, decreasing = TRUE)[1]
+  cat("Using most recent train/test data from:", most_recent_date, "\n")
+  train_test_path <- get_train_test_data_path(path_onedrive, prompt_user = FALSE, date = most_recent_date)
+} else {
+  train_test_path <- get_train_test_data_path(path_onedrive, prompt_user = FALSE, date = train_test_date_env)
+}
 cat("Loading train/test data from:", train_test_path, "\n\n")
 
 # Global seed for reproducibility
-global_seed <- 0112358
+global_seed <- config$seed
 
 # Initialize results structure ----
 mbb_results <- list()
@@ -148,14 +106,7 @@ for (enc in names(all_results)) {
         # Load data for this combination
         # Use df-predict-sf.parquet which includes holdout period (post Jan 6, 2025)
         # df-train-test_sf.parquet excludes holdout period
-        df_full <- arrow::open_dataset(
-          paste0(train_test_path, "df-predict-sf.parquet")
-        ) %>%
-          dplyr::filter(
-            exposure_category == !!exposure & enc_type == !!enc
-          ) %>%
-          dplyr::collect() %>%
-          dplyr::mutate(date = as.Date(date))
+        df_full <- load_encounter_data(train_test_path, "df-predict-sf.parquet", exposure, enc)
         
         # Create train/test/holdout splits
         # Holdout: dates after holdout_date from config
@@ -167,12 +118,7 @@ for (enc in names(all_results)) {
           dplyr::filter(date <= holdout_cutoff)
         
         # Split train/test using same parameters as in tuning
-        splits <- df_train_test %>%
-          timetk::time_series_split(
-            assess = config$train_test_params$assess_split,
-            cumulative = TRUE,
-            date_var = date
-          )
+        splits <- create_time_series_split(df_train_test, config)
         
         train_df <- rsample::training(splits)
         test_df <- rsample::testing(splits)
@@ -311,7 +257,7 @@ for (enc in names(all_results)) {
 cat("\n=== Saving MBB results ===\n")
 
 # Extract timestamp from latest_dir
-mod_ver_suffix <- sub("model_run_", "", basename(latest_dir))
+mod_ver_suffix <- extract_version_suffix(latest_dir)
 output_file <- paste0(latest_dir, "/mbb_results_nested_", mod_ver_suffix, ".rds")
 
 cat("Preparing to save MBB results:\n")
@@ -360,9 +306,6 @@ cat("\nSummary:\n")
 cat("  Successful MBB calculations:", successful, "\n")
 cat("  Failed calculations:", failed, "\n")
 
-#------------------------------
-# Close down parallel processing
-#------------------------------
-plan(sequential)
+# Note: Parallel processing cleanup is handled by on.exit() at the top of the script
 
 cat("\nMBB confidence interval generation complete!\n")

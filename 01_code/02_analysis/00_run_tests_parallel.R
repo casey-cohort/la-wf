@@ -15,7 +15,7 @@ pacman::p_load(yaml, tictoc, parallel)
 
 # Setup paths
 source(paste0(getwd(), "/01_code/paths.R"))
-source(paste0(getwd(), "/01_code/utils.R"))
+source(paste0(getwd(), "/01_code/utils_tuning.R"))
 
 #-------------------------------
 # Define test configurations
@@ -157,7 +157,7 @@ prepare_test_config <- function(test_name, test_config_mods, test_description, b
     "# set cores per test for parallel execution\n",
     "Sys.setenv(TEST_CORES_PER_TEST = '", cores_per_test, "')\n\n",
     "source(paste0(getwd(), '/01_code/paths.R'))\n",
-    "source(paste0(getwd(), '/01_code/utils.R'))\n",
+    "source(paste0(getwd(), '/01_code/utils_tuning.R'))\n",
     "\n",
     "# Step 1: Model tuning\n",
     "cat('\\n--- Step 1: Model Tuning ---\\n')\n",

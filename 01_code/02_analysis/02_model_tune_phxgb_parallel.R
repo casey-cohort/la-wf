@@ -16,11 +16,12 @@
 #-------------------------------
 # setup
 pacman::p_load(modeltime, tidymodels, tidyverse, timetk, Metrics,
-               tictoc, digest, yaml, arrow, future, furrr, progressr)
+               tictoc, digest, yaml, arrow, future, furrr, progressr, withr)
 
 # set paths 
 source(paste0(getwd(), "/01_code/paths.R"))
-source(paste0(getwd(), "/01_code/utils.R"))
+source(paste0(getwd(), "/01_code/utils_general.R"))
+source(paste0(getwd(), "/01_code/utils_tuning.R"))
 
 # read config (TEST_CONFIG_PATH env var will override if set for parallel testing)
 config <- read_config(paste0(path_repo, "01_code/02_analysis/model_config.yaml"))
@@ -44,34 +45,18 @@ options(digits = 7)
 options(scipen = 999)
 
 # set global seed for arg to tuning function
-global_seed <- 0112358
+global_seed <- config$seed
 
-# train test data to use -- datasets are in dated folders
-train_test_date <- max(list.dirs(paste0(path_onedrive, "01_data/02_processed/train_test/"), full.names = FALSE, recursive = FALSE))
+# train test data to use -- datasets are in dated folders; prompt user for version with validation
+train_test_path <- get_train_test_data_path(path_onedrive, prompt_user = TRUE)
+
+# Store train/test date in environment variable for use by subsequent pipeline steps
+train_test_date <- basename(train_test_path)
+Sys.setenv(TRAIN_TEST_DATE = train_test_date)
 
 #------------------------------
 # Set up parallel processing
-# check if running as part of parallel tests (environment variable set)
-test_cores <- Sys.getenv("TEST_CORES_PER_TEST", unset = "")
-if (test_cores != "") {
-  n_cores <- as.numeric(test_cores)
-  cat("Running as parallel test - using", n_cores, "cores per test\n")
-} else {
-  # Use cores_to_leave_out from config (default: 2 if not specified)
-  cores_to_leave_out <- ifelse(is.null(config$cores_to_leave_out), 2, config$cores_to_leave_out)
-  n_cores <- max(1, floor(parallel::detectCores() - cores_to_leave_out))
-  cat("Using", n_cores, "cores out of", parallel::detectCores(), "available (leaving", cores_to_leave_out, "cores free)\n")
-}
-plan(multisession, workers = n_cores)
-
-# monitor memory usage (this is for macs)
-tryCatch({
-  mem_info <- system("sysctl hw.memsize", intern = TRUE)
-  mem_bytes <- as.numeric(gsub("hw.memsize: ", "", mem_info))
-  cat("Available memory:", round(mem_bytes / 1024^3, 1), "GB\n")
-}, error = function(e) {
-  cat("Memory info not available\n")
-})
+n_cores <- setup_parallel_processing(config)
 
 #------------------------------
 # prepare combinations and estimate runtime
@@ -83,7 +68,6 @@ all_combinations <- config$models_to_run_flat %>%
   ))
 
 cat("Total combinations to process:", nrow(all_combinations), "\n")
-cat("Estimated runtime:", round(nrow(all_combinations) * 4 / 60 / n_cores, 1), "hours\n") # this is a pretty crude estimate, maybe not worth having here? 
 
 #------------------------------
 # process model tuning in batches with progress monitoring
@@ -119,7 +103,8 @@ for (batch in 1:n_batches) {
                 config$grid_params,
                 config$train_test_params,
                 global_seed,
-                paste0(path_onedrive, "01_data/02_processed/train_test/", train_test_date, "/"))
+                train_test_path,
+                config$grid_size)
       p()
       result
     }, .options = furrr_options(seed = TRUE))

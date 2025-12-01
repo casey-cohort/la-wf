@@ -10,6 +10,7 @@
 #' - tidyverse (for data manipulation)
 #' - arrow (for reading parquet files)
 #' - timeDate (for holiday functions)
+#' - withr (for with_seed() function to manage RNG state)
 #' 
 #' Note: These should be loaded in the main script before sourcing this file
 
@@ -35,151 +36,11 @@ gen_seed <- function(global_seed, markers){
 }
 
 #-------------------------------
-# gen ver number 
+# NOTE: Config and version number functions have been moved to utils_general.R
+# - gen_ver_number() -> utils_general.R
+# - read_config() -> utils_general.R
+# - write_config() -> utils_general.R
 #-------------------------------
-# look for if today's date exists in output folder. if so, look at version number after the date, and increment it by 1. if not, start at v001. always pad with 0's such that the ver number is 3 digits.
-# New format: model_run_YYYY-MM-DD.v###_x##_sim###
-gen_ver_number <- function(path) {
-  all_dirs <- list.dirs(path, full.names = FALSE, recursive = FALSE)
-  
-  # get today's date in the format used in folder names
-  today <- Sys.Date()
-  
-  # filter for folders that match the pattern with today's date
-  # Pattern matches: model_run_2025-10-22.v001_x20_sim1000
-  pattern <- paste0("^model_run_", today, "\\.v\\d{3}_x\\d+_sim\\d+$")
-  existing_folders <- all_dirs[grepl(pattern, all_dirs)]
-  
-  if (length(existing_folders) == 0) {
-    return("v001")
-  } else {
-    # extract version numbers from existing folders
-    versions <- sapply(existing_folders, function(x) {
-      # extract the version number (the 3 digits after .v and before _x)
-      version_match <- regmatches(x, regexpr("\\.v(\\d{3})_", x))
-      if (length(version_match) > 0) {
-        as.integer(sub("\\.v(\\d{3})_", "\\1", version_match))
-      } else {
-        0
-      }
-    })
-    
-    # remove any NA values and get the next version
-    versions <- versions[!is.na(versions)]
-    new_version <- max(versions) + 1
-    return(paste0("v", sprintf("%03d", new_version)))
-  }
-}
-
-
-#-------------------------------
-# config functions
-# TODO: use dataclass package at some point for validations 
-# this will allow us to load via yaml and validate it through dataclass which will confirm all the fields are valid and we return the config obj. 
-
-#-------------------------------
-# read config function - reads config from YAML file
-# Can override default path using TEST_CONFIG_PATH environment variable
-#-------------------------------
-read_config <- function(file_path = NULL) {
-  # Check for environment variable first (for parallel testing)
-  test_config <- Sys.getenv("TEST_CONFIG_PATH", unset = "")
-  if (test_config != "") {
-    file_path <- test_config
-    cat("Using test config from environment:", file_path, "\n")
-  } else if (is.null(file_path)) {
-    # If no env var and no path provided, use default
-    file_path <- paste0(getwd(), "/01_code/02_analysis/model_config.yaml")
-  }
-  # If file_path was provided explicitly and no env var, use the provided path
-
-  # Read in YAML file -------------------------------
-  config <- yaml::read_yaml(file_path)
-
-  # Handle YAML parser quirk that creates duplicate fields -------------------------------
-  # When using multi-line format for models_to_run_flat, the parser creates both 
-  # models_to_run and models_to_run_flat as references to the same object
-  yaml_parser_created_duplicate <- FALSE
-  if(!is.null(config$models_to_run) & !is.null(config$models_to_run_flat)){
-    # Check if they're identical (YAML parsing quirk with multi-line format)
-    if(identical(config$models_to_run, config$models_to_run_flat)){
-      # Mark this as a parser quirk (they're the same object, use models_to_run_flat)
-      yaml_parser_created_duplicate <- TRUE
-    } else {
-      # If they're different, user specified both which is an error
-      stop("Error: Must provide only one of 'models_to_run' (cartesian product) or 'models_to_run_flat' (explicit list) in the config file.")
-    }
-  }
-
-  # Validate that at least one is provided -------------------------------
-  if(is.null(config$models_to_run) & is.null(config$models_to_run_flat)){
-    stop("Error: Must provide either 'models_to_run' or 'models_to_run_flat' in the config file.")
-  }
-
-  # If models_to_run is provided (and not a YAML parser duplicate), expand to cartesian product -------
-  if(!is.null(config$models_to_run) & !yaml_parser_created_duplicate){
-    # Extract the vectors from the nested structure
-    encounter_types <- config$models_to_run$encounter_type
-    exposure_categories <- config$models_to_run$exposure_category
-    causes <- config$models_to_run$cause
-    
-    # Create all combinations using expand.grid
-    combinations <- expand.grid(
-      encounter_type = encounter_types,
-      exposure_category = exposure_categories,
-      cause = causes,
-      stringsAsFactors = FALSE
-    )
-    
-    # Convert to list of lists
-    models_to_run_flat <- lapply(1:nrow(combinations), function(i) {
-      list(
-        encounter_type = as.character(combinations$encounter_type[i]),
-        exposure_category = as.character(combinations$exposure_category[i]),
-        cause = as.character(combinations$cause[i])
-      )
-    })
-    
-    # Store as models_to_run_flat
-    config$models_to_run_flat <- models_to_run_flat
-    # Keep models_to_run for reference
-  }
-
-  # Validate that models_to_run_flat is not empty -------------------------------
-  if(length(config$models_to_run_flat) == 0){
-    stop("Error: 'models_to_run_flat' cannot be empty.")
-  }
-
-  # Make sure everything in models_to_run_flat is unique -------------------------------
-  # Convert to data frame for proper duplicate checking
-  combinations_df <- do.call(rbind, lapply(config$models_to_run_flat, function(x) {
-    data.frame(
-      encounter_type = x$encounter_type,
-      exposure_category = x$exposure_category,
-      cause = x$cause,
-      stringsAsFactors = FALSE
-    )
-  }))
-  
-  # Check for duplicates
-  if(nrow(combinations_df) != nrow(unique(combinations_df))){
-    # Find and report duplicates
-    duplicates <- combinations_df[duplicated(combinations_df) | duplicated(combinations_df, fromLast = TRUE), ]
-    cat("Duplicate combinations found:\n")
-    print(duplicates)
-    stop("Error: you have specified duplicate model combinations! Please make sure all encounter_type -- exposure_category -- cause combinations are unique.")
-  }
-  
-  return(config)
-
-}
-
-#-------------------------------
-# write config function
-#-------------------------------
-write_config <- function(config, file_path) {
-  yaml::write_yaml(config, file_path)
-}
 
 
 #-------------------------------
@@ -187,7 +48,7 @@ write_config <- function(config, file_path) {
 #------------------------------
 # run tuning function to process a single combination
 
-run_tuning <- function(combination, grid_params, train_test_params, global_seed, train_test_path) {
+run_tuning <- function(combination, grid_params, train_test_params, global_seed, train_test_path, grid_size = 200) {
 
   enc <- combination$encounter_type
   exposure <- combination$exposure_category
@@ -264,7 +125,6 @@ run_tuning <- function(combination, grid_params, train_test_params, global_seed,
       step_normalize(all_numeric_predictors()) # this does not need a seed
     
     ## specify models------------------------------
-    model_phxgb_tune_seed <- gen_seed(global_seed, c(enc, exposure, cause, "model_phxgb_tune"))
     
     # Build model arguments conditionally based on tune flag
     model_args <- list(
@@ -286,15 +146,17 @@ run_tuning <- function(combination, grid_params, train_test_params, global_seed,
     if (isTRUE(grid_params$changepoint_range$tune)) model_args$changepoint_range <- tune()
     if (isTRUE(grid_params$prior_scale_changepoints$tune)) model_args$prior_scale_changepoints <- tune()
     
+    # model_phxgb_tune_seed <- gen_seed(global_seed, c(enc, exposure, cause, "model_phxgb_tune"))
+
     model_phxgb_tune <- do.call(prophet_boost, model_args) |>
       set_engine("prophet_xgboost",
-                 seed = model_phxgb_tune_seed,
+                 # seed = model_phxgb_tune_seed,
                  early_stop = TRUE,
-                 validation = 0.2) # this needs a seed
+                 validation = train_test_params$validation) # this needs a seed
     
     # generate grid for tuning------------------------------
+    # Use withr::with_seed() to set seed only for grid generation without side effects
     grid_phxgb_tune_seed <- gen_seed(global_seed, c(enc, exposure, cause, "grid_phxgb_tune"))
-    set.seed(grid_phxgb_tune_seed)
     
     # Build grid update arguments conditionally - only include parameters with tune: true
     grid_update_args <- list()
@@ -314,7 +176,10 @@ run_tuning <- function(combination, grid_params, train_test_params, global_seed,
     if (length(grid_update_args) > 0) {
       param_set <- do.call(update, c(list(param_set), grid_update_args))
     }
-    grid_phxgb_tune <- grid_space_filling(param_set, size = 200)
+    # Use withr::with_seed() to manage RNG state locally without global side effects
+    grid_phxgb_tune <- withr::with_seed(grid_phxgb_tune_seed, {
+      grid_space_filling(param_set, size = grid_size)
+    })
     
     ## workflow for tuning------------------------------
     wflw_phxgb_tune <- workflow() |>
@@ -322,8 +187,9 @@ run_tuning <- function(combination, grid_params, train_test_params, global_seed,
       add_recipe(rec_obj_phxgb)
 
     ## model tuning------------------------------
+    # Generate seed for tuning but don't set it globally - tune_grid handles resampling deterministically
+    # The seed is used by furrr for parallel processing reproducibility
     tune_results_phxgb_seed <- gen_seed(global_seed, c(enc, exposure, cause, "tune_results_phxgb"))
-    set.seed(tune_results_phxgb_seed)
     
     # Retry logic for tune_grid to handle XGBoost precision issues
     max_retries <- 3
@@ -378,7 +244,7 @@ run_tuning <- function(combination, grid_params, train_test_params, global_seed,
     
     if (is.null(tune_results_phxgb)) {
       stop("Failed to complete tune_grid after all retries")
-    } # this needs a seed 
+    }
         
     # pull best params of model based on RMSE------------------------------
     best_params <- tune_results_phxgb |> select_best(metric = "rmse")
@@ -478,14 +344,15 @@ calculate_error_metrics <- function(result, global_seed) {
 
     while (!success && retry_count < max_retries) {
       tryCatch({
-        # fit the model 
+        # fit the model using withr::with_seed() to manage RNG state
         wflw_fit_seed <- gen_seed(global_seed, c(enc, exposure, cause, "wflw_fit"))
-        set.seed(wflw_fit_seed)
-        suppressWarnings({
-          suppressMessages({
-            wflw_fit <- wflw_phxgb_tune |>
-                      finalize_workflow(select_best(tune_results_phxgb, metric = "rmse")) |>
-                      fit(training(splits))
+        wflw_fit <- withr::with_seed(wflw_fit_seed, {
+          suppressWarnings({
+            suppressMessages({
+              wflw_phxgb_tune |>
+                finalize_workflow(select_best(tune_results_phxgb, metric = "rmse")) |>
+                fit(training(splits))
+            })
           })
         })
         
