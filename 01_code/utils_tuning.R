@@ -150,7 +150,7 @@ run_tuning <- function(combination, grid_params, train_test_params, global_seed,
 
     model_phxgb_tune <- do.call(prophet_boost, model_args) |>
       set_engine("prophet_xgboost",
-                 # seed = model_phxgb_tune_seed,
+                #  seed = model_phxgb_tune_seed, # using this does not change anything in terms of reproducibility
                  early_stop = TRUE,
                  validation = train_test_params$validation) # this needs a seed
     
@@ -195,24 +195,26 @@ run_tuning <- function(combination, grid_params, train_test_params, global_seed,
     max_retries <- 3
     retry_count <- 0
     tune_results_phxgb <- NULL
-    
+
     while (is.null(tune_results_phxgb) && retry_count < max_retries) {
       tryCatch({
         suppressWarnings({ suppressMessages({
-          tune_results_phxgb <- wflw_phxgb_tune |>
-            tune_grid( # try: tune_bayes
-              resamples = resamples_kfold,
-              grid = grid_phxgb_tune,
-              control = control_grid(
-                verbose = FALSE,
-                allow_par = FALSE,
-                save_pred = TRUE,
-                save_workflow = TRUE,
-                event_level = "first",
-                pkgs = c("tidymodels", "modeltime", "timetk")
-              ),
-              metrics = metric_set(yardstick::rmse, yardstick::rsq)
-            )
+          tune_results_phxgb <- withr::with_seed(tune_results_phxgb_seed, {
+            wflw_phxgb_tune |>
+              tune_grid( # try: tune_bayes
+                resamples = resamples_kfold,
+                grid = grid_phxgb_tune,
+                control = control_grid(
+                  verbose = FALSE,
+                  allow_par = FALSE,
+                  save_pred = TRUE,
+                  save_workflow = TRUE,
+                  event_level = "first",
+                  pkgs = c("tidymodels", "modeltime", "timetk")
+                ),
+                metrics = metric_set(yardstick::rmse, yardstick::rsq)
+              )
+          })
         })})
         
         # If we get here, tuning succeeded
