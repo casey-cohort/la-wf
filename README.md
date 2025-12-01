@@ -128,3 +128,28 @@ Result: Exactly 4 models
 - **Use only ONE option at a time** (`models_to_run` OR `models_to_run_flat`, not both)
 - When using `models_to_run_flat`, always use the multi-line format as shown above
 - The config file also includes hyperparameter tuning ranges and other settings
+
+## Reproducibility and Seed Management
+
+This codebase implements a comprehensive seed management system to ensure full reproducibility of all analyses. All random operations (model tuning, bootstrap resampling, parallel processing) are controlled by a central seed defined in `model_config.yaml`.
+
+**Key Features:**
+- Central global seed configuration
+- Deterministic seed derivation for all operations
+- Safe parallel processing with reproducible results
+- No global RNG state pollution
+
+**For detailed information**, see [SEED_MANAGEMENT.md](01_code/03_testing/SEED_MANAGEMENT.md), which covers:
+- How seeds flow through the pipeline
+- Testing reproducibility
+- Troubleshooting seed issues
+- Best practices for maintaining reproducibility
+
+**Quick Test:**
+```bash
+# Run reproducibility test
+Rscript 01_code/02_analysis/test_seed_reproducibility.R
+
+# Run again and compare results
+Rscript 01_code/02_analysis/compare_seed_test_results.R
+```

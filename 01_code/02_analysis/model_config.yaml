@@ -1,4 +1,4 @@
-seed: 0112358
+seed: 112358
 
 # Specify which models to run using ONE of the following approaches:
 #
@@ -13,6 +13,11 @@ models_to_run:
   encounter_type: ["IP", "ED"]
   exposure_category: ["evac", "high_smoke", "mid_smoke", "none"]
   cause: ["num_enc", "num_enc_resp", "num_enc_cardio", "num_enc_injury", "num_enc_neuro"]
+
+# models_to_run:
+#   encounter_type: ["ED"]
+#   exposure_category: ["mid_smoke"]
+#   cause: ["num_enc_cardio"]
   
 # OPTION 2: Currently active (comment out to use models_to_run instead)
 # models_to_run_flat:
@@ -65,12 +70,19 @@ train_test_params:
   assess_split: "67 days"
   assess_cv: "45 days"
   skip_cv: "14 days"
-  slice_limit_cv: 8
+  slice_limit_cv: 5
   holdout_date: "2025-01-06"  # Dates after this are considered holdout period
+  validation: 0.1  # XGBoost internal validation split for early stopping
 # can give a list of combinations so we can try many things -- so maybe increments of 5 and all combos.
 
+# Grid size for hyperparameter tuning
+grid_size: 200
+
 # Number of moving block bootstrap simulations for confidence intervals
-n_sim_mbb: 100
+n_sim_mbb: 500
+
+# Block length (in days) for Moving Block Bootstrap
+block_length_mbb: 14
 
 # Number of CPU cores to leave free (used by both tuning and MBB scripts)
 cores_to_leave_out: 2

@@ -6,13 +6,17 @@
 
 #' Generate Confidence Intervals using Moving Block Bootstrap for tidymodels workflows
 #'
+#' This function uses a base seed that gets propagated to parallel workers via furrr_options(seed = TRUE).
+#' Each bootstrap iteration uses a deterministic seed derived as (base_seed + iteration_number) to ensure
+#' reproducibility across parallel executions while maintaining independence between iterations.
+#'
 #' @param wflw_fit Fitted tidymodels workflow object (prophet_boost)
 #' @param train_df Training data with columns: date, outcome variable, and predictors
 #' @param target_df Target data for predictions (e.g., test or holdout)
 #' @param outcome_col Name of the outcome column (e.g., "num_enc_resp")
 #' @param n_sim Number of bootstrap simulations (default: 1000)
 #' @param L_block Block length for MBB (default: 14)
-#' @param seed Random seed for reproducibility
+#' @param seed Base seed for reproducibility (used as base_seed + i for each iteration)
 #' @param rec_obj_unfitted Optional unfitted recipe object (to avoid trained recipe issues)
 #' @param model_spec Optional model specification (to avoid XGBoost serialization issues)
 #'
@@ -31,7 +35,10 @@ generate_MBB_CIs_tidymodels <- function(wflw_fit,
                                         rec_obj_unfitted = NULL,
                                         model_spec = NULL) {
   
-  set.seed(seed)
+  # NOTE: We do NOT call set.seed() here because:
+  # 1. Parallel workers manage their own RNG state via furrr_options(seed = TRUE)
+  # 2. Each bootstrap iteration explicitly sets seed as (base_seed + i) for reproducibility
+  # 3. This approach ensures both reproducibility and proper parallel execution
   
   # Load required packages
   if (!requireNamespace("boot", quietly = TRUE)) {
@@ -114,7 +121,11 @@ generate_MBB_CIs_tidymodels <- function(wflw_fit,
       stop("timetk package not available in parallel worker")
     }
     
-    # Set seed for this iteration (base seed + iteration number for reproducibility)
+    # CRITICAL: Set seed for this iteration using (base_seed + iteration_number)
+    # This ensures each bootstrap iteration is:
+    # 1. Reproducible - same iteration always gets same seed
+    # 2. Independent - different iterations get different seeds
+    # 3. Deterministic across parallel runs - iteration order doesn't matter
     set.seed(base_seed + i)
     
     tryCatch({
@@ -205,35 +216,49 @@ generate_MBB_CIs_tidymodels <- function(wflw_fit,
   
   # Run bootstrap simulations in parallel with progress reporting
   # Use furrr_options with seed = TRUE to ensure reproducibility
-  if (!requireNamespace("progressr", quietly = TRUE)) {
-    # Fallback if progressr not available
-    cat("Note: progressr not available, running without progress bar\n")
-    bootstrap_results <- furrr::future_map(
-      1:n_sim, 
-      run_iteration_wrapper,
-      .options = furrr::furrr_options(seed = TRUE)
-    )
-  } else {
-    # Use progressr for progress reporting
-    progressr::handlers(progressr::handler_progress(
-      format = "[:bar] :percent :current/:total ETA: :eta",
-      clear = TRUE,
-      width = 60
-    ))
-    
-    with_progress({
-      p <- progressr::progressor(steps = n_sim)
-      bootstrap_results <- furrr::future_map(
+  # Wrap in tryCatch to fall back to sequential processing if parallel fails
+  bootstrap_results <- tryCatch({
+    if (!requireNamespace("progressr", quietly = TRUE)) {
+      # Fallback if progressr not available
+      cat("Note: progressr not available, running without progress bar\n")
+      furrr::future_map(
         1:n_sim, 
-        function(i) {
-          result <- run_iteration_wrapper(i)
-          p()
-          return(result)
-        },
+        run_iteration_wrapper,
         .options = furrr::furrr_options(seed = TRUE)
       )
+    } else {
+      # Use progressr for progress reporting
+      progressr::handlers(progressr::handler_progress(
+        format = "[:bar] :percent :current/:total ETA: :eta",
+        clear = TRUE,
+        width = 60
+      ))
+      
+      with_progress({
+        p <- progressr::progressor(steps = n_sim)
+        furrr::future_map(
+          1:n_sim, 
+          function(i) {
+            result <- run_iteration_wrapper(i)
+            p()
+            return(result)
+          },
+          .options = furrr::furrr_options(seed = TRUE)
+        )
+      })
+    }
+  }, error = function(e) {
+    # If parallel execution fails, fall back to sequential processing
+    warning("\nParallel execution failed with error: ", as.character(e), 
+            "\nFalling back to sequential processing...\n", call. = FALSE)
+    
+    # Run sequentially using lapply
+    cat("Running", n_sim, "MBB simulations sequentially...\n")
+    lapply(1:n_sim, function(i) {
+      if (i %% 10 == 0) cat("  Completed", i, "of", n_sim, "simulations\n")
+      run_iteration_wrapper(i)
     })
-  }
+  })
   
   # Collect results into prediction matrix and gather error messages
   error_messages <- character()
@@ -307,29 +332,28 @@ generate_MBB_CIs_tidymodels <- function(wflw_fit,
   cat("Bootstrap simulations complete!\n")
   cat("  Successful iterations:", sum(apply(pred_matrix, 2, function(x) !all(is.na(x)))), "out of", n_sim, "\n")
   
-  # Get central estimate from the bootstrap distribution (mean of bootstrap predictions)
-  central_pred <- apply(pred_matrix, 1, mean, na.rm = TRUE)
+  # Get point estimates from original fitted model
+  original_pred <- suppressWarnings({
+    suppressMessages({
+      predict(wflw_fit, new_data = target_df)$.pred
+    })
+  })
   
-  # Check if central predictions are valid
-  if (all(is.na(central_pred)) || all(is.nan(central_pred))) {
-    stop("All central predictions are NA or NaN. Check bootstrap results.")
+  # Validate original predictions
+  if (is.null(original_pred) || all(is.na(original_pred)) || all(is.nan(original_pred))) {
+    stop("Original model predictions are invalid. Check fitted workflow.")
   }
   
   # Compute summary with confidence intervals
   pred_summary <- tibble::tibble(
     ds = as.Date(target_df$date),
     y_actual = target_df[[outcome_col]],
-    yhat = central_pred,
+    yhat = original_pred,
     conf_lo = apply(pred_matrix, 1, quantile, probs = 0.025, na.rm = TRUE),
     conf_hi = apply(pred_matrix, 1, quantile, probs = 0.975, na.rm = TRUE)
   )
   
-  # Validate that predictions were generated
-  if (all(is.na(pred_summary$yhat)) || all(is.nan(pred_summary$yhat))) {
-    stop("All predicted values are NA or NaN. Check bootstrap results.")
-  }
-  
-  cat("  Valid predictions:", sum(!is.na(pred_summary$yhat) & !is.nan(pred_summary$yhat)), "out of", nrow(pred_summary), "\n")
+  cat("  Point estimates from original model: ", sum(!is.na(pred_summary$yhat)), "out of", nrow(pred_summary), "\n")
   
   # Return results
   return(list(
@@ -433,15 +457,16 @@ rebuild_and_fit_workflow <- function(result, train_df, global_seed, enc, exposur
     add_model(model_phxgb_final) %>%
     add_recipe(rec_obj_phxgb)
   
-  # Fit on training data
+  # Fit on training data using withr::with_seed() to manage RNG state
   wflw_fit_seed <- digest::digest(paste(enc, exposure, cause, "wflw_fit_rebuild"), 
                                    algo = "xxhash32", seed = global_seed)
   wflw_fit_seed_int <- as.integer(paste0("0x", substr(wflw_fit_seed, 1, 6)), 16)
-  set.seed(wflw_fit_seed_int)
   
-  wflw_fit <- suppressWarnings({
-    suppressMessages({
-      fit(wflw_final, train_df)
+  wflw_fit <- withr::with_seed(wflw_fit_seed_int, {
+    suppressWarnings({
+      suppressMessages({
+        fit(wflw_final, train_df)
+      })
     })
   })
   

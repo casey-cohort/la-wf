@@ -12,78 +12,44 @@ pacman::p_load(tidyverse, ggplot2, patchwork, yardstick, gt, here, Metrics)
 
 # Set paths and source utilities
 source(paste0(getwd(), "/01_code/paths.R"))
-source(paste0(getwd(), "/01_code/utils.R"))
+source(paste0(getwd(), "/01_code/utils_general.R"))
+source(paste0(getwd(), "/01_code/utils_tuning.R"))
 source(paste0(getwd(), "/01_code/utils_outputs.R"))
 
+# Validation function for metrics calculation ----
+#' Validate data has sufficient observations for metrics
+#'
+#' @param data Dataframe with y_actual and yhat columns
+#' @param data_name Name for logging purposes
+#' @param min_n Minimum required observations (default 3)
+#' @return TRUE if valid, FALSE otherwise
+#'
+validate_for_metrics <- function(data, data_name, min_n = 3) {
+  if (nrow(data) == 0) {
+    cat("  WARNING:", data_name, "is empty. Skipping metrics.\n")
+    return(FALSE)
+  }
+  if (nrow(data) < min_n) {
+    cat("  WARNING:", data_name, "has only", nrow(data), 
+        "observations (min", min_n, "recommended). Skipping metrics.\n")
+    return(FALSE)
+  }
+  return(TRUE)
+}
+
 # Find latest MBB results ----
-# Use new folder naming pattern: model_run_YYYY-MM-DD.v###_x##_sim###
-find_latest_version <- function(output_path) {
-  output_dirs <- list.dirs(output_path, full.names = TRUE, recursive = FALSE)
-  # Filter by new pattern
-  pattern <- "^model_run_\\d{4}-\\d{2}-\\d{2}\\.v\\d{3}_x\\d+_sim\\d+$"
-  output_dirs <- output_dirs[grepl(pattern, basename(output_dirs))]
-  if (length(output_dirs) == 0) {
-    return(NULL)
-  }
-  latest_dir <- output_dirs[order(basename(output_dirs), decreasing = TRUE)][1]
-  return(latest_dir)
-}
+latest_dir <- get_output_directory(path_onedrive)
 
-# Check if output directory was set by tuning script (for parallel tests)
-output_dir_env <- Sys.getenv("MODEL_OUTPUT_DIR", unset = "")
-cat("MODEL_OUTPUT_DIR environment variable:", ifelse(output_dir_env == "", "(not set)", output_dir_env), "\n")
-
-if (output_dir_env != "" && dir.exists(output_dir_env)) {
-  latest_dir <- output_dir_env
-  cat("Using output directory from MODEL_OUTPUT_DIR environment variable:", latest_dir, "\n")
-} else {
-  cat("MODEL_OUTPUT_DIR not set or directory doesn't exist, falling back to find_latest_version()\n")
-  # Fall back to finding latest directory
-  latest_dir <- find_latest_version(paste0(path_onedrive, "02_output/"))
-  
-  if (is.null(latest_dir)) {
-    stop("No model output directories found. Please run 02_model_tune_phxgb_parallel.R first.")
-  }
-  
-  cat("Loading MBB results from:", latest_dir, "\n")
-}
-
-# Find the MBB results file
-mbb_files <- list.files(latest_dir, pattern = "mbb_results_nested_.*\\.rds", full.names = TRUE)
-if (length(mbb_files) == 0) {
-  cat("ERROR: No MBB results file found in:", latest_dir, "\n")
-  cat("Looking for pattern: mbb_results_nested_*.rds\n")
-  cat("Files in directory:\n")
-  print(list.files(latest_dir))
-  stop("No MBB results file found. Please run 04_model_mbb_cis.R first.")
-}
-mbb_file <- mbb_files[1]
-cat("Loading:", mbb_file, "\n\n")
-
-mbb_results <- readRDS(mbb_file)
+# Load MBB results
+mbb_results <- load_mbb_results(latest_dir)
 
 # Extract timestamp
-mod_ver_suffix <- sub("model_run_", "", basename(latest_dir))
+mod_ver_suffix <- extract_version_suffix(latest_dir)
 
 # Create output directories ----
-figures_dir <- paste0(latest_dir, "/figures/")
-tables_dir <- paste0(latest_dir, "/tables/")
-cat("Creating output directories:\n")
-cat("  Figures:", figures_dir, "\n")
-cat("  Tables:", tables_dir, "\n")
-
-dir.create(figures_dir, showWarnings = FALSE, recursive = TRUE)
-dir.create(tables_dir, showWarnings = FALSE, recursive = TRUE)
-
-# Verify directories were created
-if (!dir.exists(figures_dir)) {
-  stop("Failed to create figures directory:", figures_dir)
-}
-if (!dir.exists(tables_dir)) {
-  stop("Failed to create tables directory:", tables_dir)
-}
-
-cat("Output directories created successfully\n\n")
+output_dirs <- create_output_subdirectories(latest_dir, c("figures", "tables"))
+figures_dir <- output_dirs$figures
+tables_dir <- output_dirs$tables
 
 # Initialize results storage ----
 all_metrics_list <- list()
@@ -138,12 +104,12 @@ for (enc in names(mbb_results)) {
       
       tryCatch({
         # Extract data
-        train_summary <- result$train_summary
+        train_MBB <- result$train_summary
         test_MBB <- result$test_MBB
         holdout_MBB <- result$holdout_MBB
-        train_df <- result$train_df
-        test_df <- result$test_df
-        holdout_df <- result$holdout_df
+        train_obs <- result$train_df
+        test_obs <- result$test_df
+        holdout_obs <- result$holdout_df
         
         # ============================================================
         # 1. Calculate Metrics with MBB CIs
@@ -151,45 +117,84 @@ for (enc in names(mbb_results)) {
         
         cat("  Calculating metrics...\n")
         
-        # Training metrics
-        train_metrics <- tibble(
-          window = "train",
-          mdae = Metrics::mdae(train_summary$y_actual, train_summary$yhat),
-          mae = yardstick::mae_vec(train_summary$y_actual, train_summary$yhat),
-          rmse = yardstick::rmse_vec(train_summary$y_actual, train_summary$yhat),
-          mape = yardstick::mape_vec(train_summary$y_actual, train_summary$yhat),
-          rse = Metrics::rse(train_summary$y_actual, train_summary$yhat),
-          smape = Metrics::smape(train_summary$y_actual, train_summary$yhat),
-          r2 = round(1 - sum((train_summary$y_actual - train_summary$yhat)^2) / 
-                       sum((train_summary$y_actual - mean(train_summary$y_actual))^2), 4)
-        )
-        
-        # Test metrics
-        test_metrics <- tibble(
-          window = "test",
-          mdae = Metrics::mdae(test_MBB$pred_summary$y_actual, test_MBB$pred_summary$yhat),
-          mae = yardstick::mae_vec(test_MBB$pred_summary$y_actual, test_MBB$pred_summary$yhat),
-          rmse = yardstick::rmse_vec(test_MBB$pred_summary$y_actual, test_MBB$pred_summary$yhat),
-          mape = yardstick::mape_vec(test_MBB$pred_summary$y_actual, test_MBB$pred_summary$yhat),
-          rse = Metrics::rse(test_MBB$pred_summary$y_actual, test_MBB$pred_summary$yhat),
-          smape = Metrics::smape(test_MBB$pred_summary$y_actual, test_MBB$pred_summary$yhat),
-          r2 = round(1 - sum((test_MBB$pred_summary$y_actual - test_MBB$pred_summary$yhat)^2) / 
-                       sum((test_MBB$pred_summary$y_actual - mean(test_MBB$pred_summary$y_actual))^2), 4)
-        )
-        
-        # Holdout metrics
-        if (!is.null(holdout_MBB) && nrow(holdout_df) > 0) {
-          holdout_metrics <- tibble(
-            window = "holdout",
-            mdae = Metrics::mdae(holdout_MBB$pred_summary$y_actual, holdout_MBB$pred_summary$yhat),
-            mae = yardstick::mae_vec(holdout_MBB$pred_summary$y_actual, holdout_MBB$pred_summary$yhat),
-            rmse = yardstick::rmse_vec(holdout_MBB$pred_summary$y_actual, holdout_MBB$pred_summary$yhat),
-            mape = yardstick::mape_vec(holdout_MBB$pred_summary$y_actual, holdout_MBB$pred_summary$yhat),
-            rse = Metrics::rse(holdout_MBB$pred_summary$y_actual, holdout_MBB$pred_summary$yhat),
-            smape = Metrics::smape(holdout_MBB$pred_summary$y_actual, holdout_MBB$pred_summary$yhat),
-            r2 = round(1 - sum((holdout_MBB$pred_summary$y_actual - holdout_MBB$pred_summary$yhat)^2) / 
-                         sum((holdout_MBB$pred_summary$y_actual - mean(holdout_MBB$pred_summary$y_actual))^2), 4)
+        # Training metrics with validation
+        if (!validate_for_metrics(train_MBB, "Training")) {
+          train_metrics <- tibble(
+            window = "train",
+            mdae = NA_real_,
+            mae = NA_real_,
+            rmse = NA_real_,
+            mape = NA_real_,
+            rse = NA_real_,
+            smape = NA_real_,
+            r2 = NA_real_
           )
+        } else {
+          train_metrics <- tibble(
+            window = "train",
+            mdae = Metrics::mdae(train_MBB$y_actual, train_MBB$yhat),
+            mae = yardstick::mae_vec(train_MBB$y_actual, train_MBB$yhat),
+            rmse = yardstick::rmse_vec(train_MBB$y_actual, train_MBB$yhat),
+            mape = yardstick::mape_vec(train_MBB$y_actual, train_MBB$yhat),
+            rse = Metrics::rse(train_MBB$y_actual, train_MBB$yhat),
+            smape = Metrics::smape(train_MBB$y_actual, train_MBB$yhat),
+            r2 = round(1 - sum((train_MBB$y_actual - train_MBB$yhat)^2) / 
+                         sum((train_MBB$y_actual - mean(train_MBB$y_actual))^2), 4)
+          )
+        }
+        
+        # Test metrics with validation
+        if (!validate_for_metrics(test_MBB$pred_summary, "Test")) {
+          test_metrics <- tibble(
+            window = "test",
+            mdae = NA_real_,
+            mae = NA_real_,
+            rmse = NA_real_,
+            mape = NA_real_,
+            rse = NA_real_,
+            smape = NA_real_,
+            r2 = NA_real_
+          )
+        } else {
+          test_metrics <- tibble(
+            window = "test",
+            mdae = Metrics::mdae(test_MBB$pred_summary$y_actual, test_MBB$pred_summary$yhat),
+            mae = yardstick::mae_vec(test_MBB$pred_summary$y_actual, test_MBB$pred_summary$yhat),
+            rmse = yardstick::rmse_vec(test_MBB$pred_summary$y_actual, test_MBB$pred_summary$yhat),
+            mape = yardstick::mape_vec(test_MBB$pred_summary$y_actual, test_MBB$pred_summary$yhat),
+            rse = Metrics::rse(test_MBB$pred_summary$y_actual, test_MBB$pred_summary$yhat),
+            smape = Metrics::smape(test_MBB$pred_summary$y_actual, test_MBB$pred_summary$yhat),
+            r2 = round(1 - sum((test_MBB$pred_summary$y_actual - test_MBB$pred_summary$yhat)^2) / 
+                         sum((test_MBB$pred_summary$y_actual - mean(test_MBB$pred_summary$y_actual))^2), 4)
+          )
+        }
+        
+        # Holdout metrics with validation
+        if (!is.null(holdout_MBB) && nrow(holdout_obs) > 0) {
+          if (!validate_for_metrics(holdout_MBB$pred_summary, "Holdout")) {
+            holdout_metrics <- tibble(
+              window = "holdout",
+              mdae = NA_real_,
+              mae = NA_real_,
+              rmse = NA_real_,
+              mape = NA_real_,
+              rse = NA_real_,
+              smape = NA_real_,
+              r2 = NA_real_
+            )
+          } else {
+            holdout_metrics <- tibble(
+              window = "holdout",
+              mdae = Metrics::mdae(holdout_MBB$pred_summary$y_actual, holdout_MBB$pred_summary$yhat),
+              mae = yardstick::mae_vec(holdout_MBB$pred_summary$y_actual, holdout_MBB$pred_summary$yhat),
+              rmse = yardstick::rmse_vec(holdout_MBB$pred_summary$y_actual, holdout_MBB$pred_summary$yhat),
+              mape = yardstick::mape_vec(holdout_MBB$pred_summary$y_actual, holdout_MBB$pred_summary$yhat),
+              rse = Metrics::rse(holdout_MBB$pred_summary$y_actual, holdout_MBB$pred_summary$yhat),
+              smape = Metrics::smape(holdout_MBB$pred_summary$y_actual, holdout_MBB$pred_summary$yhat),
+              r2 = round(1 - sum((holdout_MBB$pred_summary$y_actual - holdout_MBB$pred_summary$yhat)^2) / 
+                           sum((holdout_MBB$pred_summary$y_actual - mean(holdout_MBB$pred_summary$y_actual))^2), 4)
+            )
+          }
         } else {
           holdout_metrics <- tibble(
             window = "holdout",
@@ -222,14 +227,14 @@ for (enc in names(mbb_results)) {
         cat("  Creating plots...\n")
         
         # Prepare visualization data
-        df_train_vis <- train_df %>%
+        df_train_vis <- train_obs %>%
           left_join(
-            train_summary %>% select(ds, yhat, yhat_lower = conf_lo, yhat_upper = conf_hi),
+            train_MBB %>% select(ds, yhat, yhat_lower = conf_lo, yhat_upper = conf_hi),
             by = c("date" = "ds")
           ) %>%
           mutate(count = !!sym(cause))
         
-        df_test_vis <- test_df %>%
+        df_test_vis <- test_obs %>%
           left_join(
             test_MBB$pred_summary %>% select(ds, yhat, yhat_lower = conf_lo, yhat_upper = conf_hi),
             by = c("date" = "ds")
@@ -251,8 +256,8 @@ for (enc in names(mbb_results)) {
         p2 <- create_fit_plot(df_test_vis, paste0("B) Test (forecast with MBB CIs) (", test_date_range, ")"))
         
         # Add holdout plot if available
-        if (!is.null(holdout_MBB) && nrow(holdout_df) > 0) {
-          df_holdout_vis <- holdout_df %>%
+        if (!is.null(holdout_MBB) && nrow(holdout_obs) > 0) {
+          df_holdout_vis <- holdout_obs %>%
             left_join(
               holdout_MBB$pred_summary %>% select(ds, yhat, yhat_lower = conf_lo, yhat_upper = conf_hi),
               by = c("date" = "ds")
@@ -300,7 +305,7 @@ for (enc in names(mbb_results)) {
         # 3. Calculate Excess Hospitalizations (Holdout period only)
         # ============================================================
         
-        if (!is.null(holdout_MBB) && nrow(holdout_df) > 0) {
+        if (!is.null(holdout_MBB) && nrow(holdout_obs) > 0) {
           cat("  Calculating excess hospitalizations...\n")
           
           # Daily data for holdout period
@@ -313,12 +318,16 @@ for (enc in names(mbb_results)) {
             rename(conf_lo = conf_lo, conf_hi = conf_hi)
           
           # Total for entire holdout period
+          # Sum predictions for each bootstrap iteration to get distribution of totals
+          # This properly accounts for temporal correlation in the bootstrap samples
+          bootstrap_totals <- colSums(holdout_MBB$pred_matrix, na.rm = TRUE)
+          
           df_period_all_holdout <- holdout_MBB$pred_summary %>%
             summarise(
               observed = sum(y_actual),
               expected = sum(yhat),
-              expected_low = sum(conf_lo),
-              expected_up = sum(conf_hi),
+              expected_low = quantile(bootstrap_totals, probs = 0.025, na.rm = TRUE),
+              expected_up = quantile(bootstrap_totals, probs = 0.975, na.rm = TRUE),
               period = paste0(
                 format(min(ds), "%b %d"), " - ",
                 format(max(ds), "%b %d, %Y")
