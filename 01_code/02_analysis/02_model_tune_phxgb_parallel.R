@@ -180,7 +180,7 @@ if (length(successful_results) > 0) {
     result <- successful_results[[i]]
     
     # calc metrics using the new function
-    metrics_result <- calculate_error_metrics(result, global_seed)
+    metrics_result <- calculate_error_metrics(result, global_seed, config)
     
     if (isTRUE(metrics_result$success)) {
       # create unique key for this result

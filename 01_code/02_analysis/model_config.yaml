@@ -84,6 +84,9 @@ n_sim_mbb: 100
 # Block length (in days) for Moving Block Bootstrap
 block_length_mbb: 14
 
+# MASE seasonality parameter (for naive forecast baseline)
+mase_seasonality: 7
+
 # Number of CPU cores to leave free (used by both tuning and MBB scripts)
 cores_to_leave_out: 2
 

@@ -323,7 +323,7 @@ calc_mase <- function(actual, predicted, training_actual, seasonality = 7) {
 
 # helper function to calculate metrics for a dataset
 # training_data is optional - if provided, MASE will be calculated
-calc_metrics <- function(data_type, dataset, model_table, enc_type_val, exposure_category_val, cause_val, training_data = NULL) {
+calc_metrics <- function(data_type, dataset, model_table, enc_type_val, exposure_category_val, cause_val, training_data = NULL, config = NULL) {
       tryCatch({
         preds <- suppressWarnings({
           suppressMessages({
@@ -336,6 +336,9 @@ calc_metrics <- function(data_type, dataset, model_table, enc_type_val, exposure
         })
         
         if (nrow(preds) > 0 && !all(is.na(preds$.prediction))) {
+          # Get seasonality from config, default to 7 if not provided
+          seasonality_val <- if (!is.null(config) && !is.null(config$mase_seasonality)) config$mase_seasonality else 7
+          
           # Calculate MASE if training data is provided
           mase_value <- if (!is.null(training_data) && nrow(training_data) > 7) {
             # Get training actuals for naive forecast scaling
@@ -347,10 +350,10 @@ calc_metrics <- function(data_type, dataset, model_table, enc_type_val, exposure
                   unnest(cols = c(.calibration_data))
               })
             })
-            calc_mase(preds$.actual, preds$.prediction, training_preds$.actual, seasonality = 7)
+            calc_mase(preds$.actual, preds$.prediction, training_preds$.actual, seasonality = seasonality_val)
           } else if (data_type == "training") {
             # For training data, MASE is calculated against itself (in-sample)
-            calc_mase(preds$.actual, preds$.prediction, preds$.actual, seasonality = 7)
+            calc_mase(preds$.actual, preds$.prediction, preds$.actual, seasonality = seasonality_val)
           } else {
             NA_real_
           }
@@ -385,7 +388,7 @@ calc_metrics <- function(data_type, dataset, model_table, enc_type_val, exposure
     }
 
 # main function to  calculate error metrics for a given combination
-calculate_error_metrics <- function(result, global_seed) {
+calculate_error_metrics <- function(result, global_seed, config = NULL) {
   
   enc <- result$enc_type
   exposure <- result$exposure_category
@@ -466,8 +469,8 @@ calculate_error_metrics <- function(result, global_seed) {
     # Calculate training and testing metrics - pass model_tbl and combination parameters
     # For training, no separate training_data needed (MASE calculated in-sample)
     # For testing, pass training data for proper MASE scaling
-    training_metrics <- calc_metrics("training", training(splits), model_tbl, enc, exposure, cause, training_data = NULL)
-    testing_metrics <- calc_metrics("testing", testing(splits), model_tbl, enc, exposure, cause, training_data = training(splits))
+    training_metrics <- calc_metrics("training", training(splits), model_tbl, enc, exposure, cause, training_data = NULL, config = config)
+    testing_metrics <- calc_metrics("testing", testing(splits), model_tbl, enc, exposure, cause, training_data = training(splits), config = config)
     
     # Combine results
     all_metrics <- bind_rows(training_metrics, testing_metrics)

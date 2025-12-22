@@ -140,7 +140,7 @@ for (enc in names(mbb_results)) {
             rse = Metrics::rse(train_MBB$y_actual, train_MBB$yhat),
             smape = Metrics::smape(train_MBB$y_actual, train_MBB$yhat),
             # MASE: in-sample for training (scaled by naive forecast on training data)
-            mase = calc_mase(train_MBB$y_actual, train_MBB$yhat, train_MBB$y_actual, seasonality = 7),
+            mase = calc_mase(train_MBB$y_actual, train_MBB$yhat, train_MBB$y_actual, seasonality = config$mase_seasonality),
             r2 = round(1 - sum((train_MBB$y_actual - train_MBB$yhat)^2) / 
                          sum((train_MBB$y_actual - mean(train_MBB$y_actual))^2), 4)
           )
@@ -170,7 +170,7 @@ for (enc in names(mbb_results)) {
             smape = Metrics::smape(test_MBB$pred_summary$y_actual, test_MBB$pred_summary$yhat),
             # MASE: test errors scaled by naive forecast errors from training data
             mase = calc_mase(test_MBB$pred_summary$y_actual, test_MBB$pred_summary$yhat, 
-                            train_MBB$y_actual, seasonality = 7),
+                            train_MBB$y_actual, seasonality = config$mase_seasonality),
             r2 = round(1 - sum((test_MBB$pred_summary$y_actual - test_MBB$pred_summary$yhat)^2) / 
                          sum((test_MBB$pred_summary$y_actual - mean(test_MBB$pred_summary$y_actual))^2), 4)
           )
@@ -201,7 +201,7 @@ for (enc in names(mbb_results)) {
               smape = Metrics::smape(holdout_MBB$pred_summary$y_actual, holdout_MBB$pred_summary$yhat),
               # MASE: holdout errors scaled by naive forecast errors from training data
               mase = calc_mase(holdout_MBB$pred_summary$y_actual, holdout_MBB$pred_summary$yhat, 
-                              train_MBB$y_actual, seasonality = 7),
+                              train_MBB$y_actual, seasonality = config$mase_seasonality),
               r2 = round(1 - sum((holdout_MBB$pred_summary$y_actual - holdout_MBB$pred_summary$yhat)^2) / 
                            sum((holdout_MBB$pred_summary$y_actual - mean(holdout_MBB$pred_summary$y_actual))^2), 4)
             )
