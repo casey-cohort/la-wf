@@ -102,39 +102,70 @@ create_fit_plot <- function(df, title) {
       date_original = date
     )
   
-  # Create custom breaks and labels
-  # Identify segments (before/after gaps)
-  segment_breaks <- c(1)  # Start of first segment
-  segment_labels <- c(format(df_filtered$date_original[1], "%b %Y"))
+  # Determine appropriate break interval based on data length
+  n_points <- nrow(df_filtered)
+  if (n_points <= 30) {
+    # For short series, show every point or every few points
+    break_interval <- max(1, floor(n_points / 10))
+  } else if (n_points <= 100) {
+    # For medium series, show roughly every week
+    break_interval <- max(1, floor(n_points / 15))
+  } else if (n_points <= 200) {
+    # For longer series, show roughly every 2 weeks
+    break_interval <- max(1, floor(n_points / 20))
+  } else {
+    # For very long series, show roughly every month
+    break_interval <- max(1, floor(n_points / 25))
+  }
   
+  # Generate breaks at regular intervals
+  x_breaks <- seq(1, n_points, by = break_interval)
+  # Always include the last point
+  if (max(x_breaks) < n_points) {
+    x_breaks <- c(x_breaks, n_points)
+  }
+  
+  # Create labels with MM-DD-YY format
+  x_labels <- format(df_filtered$date_original[x_breaks], "%m-%d-%y")
+  
+  # Handle gaps: add gap markers if needed
   if (nrow(relevant_gaps) > 0) {
+    gap_breaks <- c()
+    gap_labels <- c()
+    
     for (i in 1:nrow(relevant_gaps)) {
       # Find last point before gap
       before_gap_idx <- which(df_filtered$date_original < relevant_gaps$start[i])
       if (length(before_gap_idx) > 0) {
         last_before <- max(before_gap_idx)
-        segment_breaks <- c(segment_breaks, last_before)
-        segment_labels <- c(segment_labels, "//")
+        # Only add if not already in breaks
+        if (!last_before %in% x_breaks) {
+          gap_breaks <- c(gap_breaks, last_before)
+          gap_labels <- c(gap_labels, "//")
+        }
       }
       
       # Find first point after gap
       after_gap_idx <- which(df_filtered$date_original > relevant_gaps$end[i])
       if (length(after_gap_idx) > 0) {
         first_after <- min(after_gap_idx)
-        segment_breaks <- c(segment_breaks, first_after)
-        segment_labels <- c(segment_labels, "//")
+        # Only add if not already in breaks
+        if (!first_after %in% x_breaks) {
+          gap_breaks <- c(gap_breaks, first_after)
+          gap_labels <- c(gap_labels, "//")
+        }
       }
     }
+    
+    # Combine regular breaks with gap markers
+    all_breaks <- c(x_breaks, gap_breaks)
+    all_labels <- c(x_labels, gap_labels)
+    
+    # Sort by break position
+    sort_order <- order(all_breaks)
+    x_breaks <- all_breaks[sort_order]
+    x_labels <- all_labels[sort_order]
   }
-  
-  # Add end point
-  segment_breaks <- c(segment_breaks, nrow(df_filtered))
-  segment_labels <- c(segment_labels, format(df_filtered$date_original[nrow(df_filtered)], "%b %Y"))
-  
-  # Remove duplicates and sort
-  unique_idx <- !duplicated(segment_breaks)
-  segment_breaks <- segment_breaks[unique_idx]
-  segment_labels <- segment_labels[unique_idx]
   
   # Create the plot using date_idx for x-axis
   p <- ggplot2::ggplot(df_filtered, ggplot2::aes(x = date_idx)) +
@@ -145,16 +176,21 @@ create_fit_plot <- function(df, title) {
                 alpha = 0.2, fill = "blue", show.legend = FALSE) +
     ggplot2::scale_color_manual(values = c("Actual" = "red", "Predicted" = "blue"), name = "") +
     ggplot2::scale_x_continuous(
-      breaks = segment_breaks,
-      labels = segment_labels,
+      breaks = x_breaks,
+      labels = x_labels,
       expand = ggplot2::expansion(mult = 0.01)
+    ) +
+    ggplot2::scale_y_continuous(
+      sec.axis = ggplot2::sec_axis(~ ., name = "Count")
     ) +
     ggplot2::labs(title = title, y = "Count", x = "Date") +
     ggplot2::theme_minimal() +
     ggplot2::theme(
       legend.position = "bottom",
       plot.title = ggplot2::element_text(face = "bold", size = 12),
-      axis.text.x = ggplot2::element_text(angle = 45, hjust = 1)
+      axis.text.x = ggplot2::element_text(angle = 45, hjust = 1),
+      axis.text.y.right = ggplot2::element_text(),
+      axis.ticks.y.right = ggplot2::element_line()
     )
   
   return(p)
