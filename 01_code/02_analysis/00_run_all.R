@@ -130,7 +130,7 @@ cat("Total execution time:", round(total_executed_time, 2), "minutes\n")
 cat("Total execution time:", round(total_executed_time / 60, 2), "hours\n\n")
 
 # Find output directory (using new naming pattern)
-latest_dir <- find_latest_version(paste0(path_onedrive, "02_output/"))
+latest_dir <- find_latest_version(paste0(path_onedrive, "02_output/models/"))
 
 cat("Results saved to:\n")
 cat("  ", latest_dir, "\n\n")

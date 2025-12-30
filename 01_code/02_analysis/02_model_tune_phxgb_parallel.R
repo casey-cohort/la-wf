@@ -32,13 +32,13 @@ n_sim_mbb <- config$n_sim_mbb
 
 # determine version number, construct folder name, make folder, set suffix for model version
 # new format: model_run_YYYY-MM-DD.v###_x##_sim###
-ver <- gen_ver_number(paste0(path_onedrive, "02_output/"))
+ver <- gen_ver_number(paste0(path_onedrive, "02_output/models/"))
 folder_name <- paste0("model_run_", Sys.Date(), ".", ver, "_x", n_models, "_sim", n_sim_mbb, "/")
-dir.create(paste0(path_onedrive, "02_output/", folder_name), showWarnings = FALSE)
+dir.create(paste0(path_onedrive, "02_output/models/", folder_name), showWarnings = FALSE, recursive = TRUE)
 mod_ver_suffix <- paste0(Sys.Date(), ".", ver, "_x", n_models, "_sim", n_sim_mbb)
 
 # write this ver of config back out
-write_config(config, paste0(path_onedrive, "02_output/", folder_name, "model_config_", mod_ver_suffix, ".yaml"))
+write_config(config, paste0(path_onedrive, "02_output/models/", folder_name, "model_config_", mod_ver_suffix, ".yaml"))
 
 # ensure consistent numeric precision 
 options(digits = 7)
@@ -116,7 +116,7 @@ for (batch in 1:n_batches) {
   
   # save intermediate results
   save(all_combination_results, 
-       file = paste0(path_onedrive, "02_output/", folder_name, "intermediate_results_batch_", batch, "_", mod_ver_suffix, ".RData"))
+       file = paste0(path_onedrive, "02_output/models/", folder_name, "intermediate_results_batch_", batch, "_", mod_ver_suffix, ".RData"))
 
   cat("Completed", length(all_combination_results), "of", nrow(all_combinations), "combinations\n")
   
@@ -180,7 +180,7 @@ if (length(successful_results) > 0) {
     result <- successful_results[[i]]
     
     # calc metrics using the new function
-    metrics_result <- calculate_error_metrics(result, global_seed)
+    metrics_result <- calculate_error_metrics(result, global_seed, config)
     
     if (isTRUE(metrics_result$success)) {
       # create unique key for this result
@@ -304,15 +304,15 @@ if (!is.null(all_metrics) && nrow(all_metrics) > 0) {
 #------------------------------
 # save final results
 save(all_results, 
-     file = paste0(path_onedrive, "02_output/", folder_name, "all_results_nested_", mod_ver_suffix, ".RData"))
+     file = paste0(path_onedrive, "02_output/models/", folder_name, "all_results_nested_", mod_ver_suffix, ".RData"))
 
 save(all_combination_results, 
-     file = paste0(path_onedrive, "02_output/", folder_name, "all_results_with_errors_flat_", mod_ver_suffix, ".RData"))
+     file = paste0(path_onedrive, "02_output/models/", folder_name, "all_results_with_errors_flat_", mod_ver_suffix, ".RData"))
 
 # save performance metrics
 if (!is.null(all_metrics) && nrow(all_metrics) > 0) {
   write.csv(all_metrics, 
-            paste0(path_onedrive, "02_output/", folder_name, "performance_metrics_", mod_ver_suffix, ".csv"), 
+            paste0(path_onedrive, "02_output/models/", folder_name, "performance_metrics_", mod_ver_suffix, ".csv"), 
             row.names = FALSE)
   cat("Performance metrics saved successfully\n")
 } else {
@@ -320,7 +320,7 @@ if (!is.null(all_metrics) && nrow(all_metrics) > 0) {
 }
 
 # Save output directory path for subsequent scripts (MBB, outputs)
-output_dir_full <- paste0(path_onedrive, "02_output/", folder_name)
+output_dir_full <- paste0(path_onedrive, "02_output/models/", folder_name)
 Sys.setenv(MODEL_OUTPUT_DIR = output_dir_full)
 
 cat("\nProcessing complete!\n")

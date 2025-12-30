@@ -136,7 +136,7 @@ validate_global_seed <- function(config) {
 #' @return Version string (e.g., "v001", "v002")
 #'
 #' @examples
-#' ver <- gen_ver_number(paste0(path_onedrive, "02_output/"))
+#' ver <- gen_ver_number(paste0(path_onedrive, "02_output/models/"))
 #'
 gen_ver_number <- function(path) {
   all_dirs <- list.dirs(path, full.names = FALSE, recursive = FALSE)
@@ -336,7 +336,7 @@ setup_parallel_processing <- function(config) {
 #' @return Full path to the latest model output directory, or NULL if none found
 #'
 #' @examples
-#' latest_dir <- find_latest_version(paste0(path_onedrive, "02_output/"))
+#' latest_dir <- find_latest_version(paste0(path_onedrive, "02_output/models/"))
 #'
 find_latest_version <- function(output_path) {
   output_dirs <- list.dirs(output_path, full.names = TRUE, recursive = FALSE)
@@ -373,7 +373,7 @@ get_output_directory <- function(path_onedrive, required = TRUE) {
     return(output_dir_env)
   } else {
     cat("MODEL_OUTPUT_DIR not set or directory doesn't exist, falling back to find_latest_version()\n")
-    latest_dir <- find_latest_version(paste0(path_onedrive, "02_output/"))
+    latest_dir <- find_latest_version(paste0(path_onedrive, "02_output/models/"))
     
     if (is.null(latest_dir) && required) {
       stop("No model output directories found. Please run 02_model_tune_phxgb_parallel.R first.")

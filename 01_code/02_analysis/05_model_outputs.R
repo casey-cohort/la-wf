@@ -127,6 +127,7 @@ for (enc in names(mbb_results)) {
             mape = NA_real_,
             rse = NA_real_,
             smape = NA_real_,
+            mase = NA_real_,
             r2 = NA_real_
           )
         } else {
@@ -138,6 +139,8 @@ for (enc in names(mbb_results)) {
             mape = yardstick::mape_vec(train_MBB$y_actual, train_MBB$yhat),
             rse = Metrics::rse(train_MBB$y_actual, train_MBB$yhat),
             smape = Metrics::smape(train_MBB$y_actual, train_MBB$yhat),
+            # MASE: in-sample for training (scaled by naive forecast on training data)
+            mase = calc_mase(train_MBB$y_actual, train_MBB$yhat, train_MBB$y_actual, seasonality = config$mase_seasonality),
             r2 = round(1 - sum((train_MBB$y_actual - train_MBB$yhat)^2) / 
                          sum((train_MBB$y_actual - mean(train_MBB$y_actual))^2), 4)
           )
@@ -153,6 +156,7 @@ for (enc in names(mbb_results)) {
             mape = NA_real_,
             rse = NA_real_,
             smape = NA_real_,
+            mase = NA_real_,
             r2 = NA_real_
           )
         } else {
@@ -164,6 +168,9 @@ for (enc in names(mbb_results)) {
             mape = yardstick::mape_vec(test_MBB$pred_summary$y_actual, test_MBB$pred_summary$yhat),
             rse = Metrics::rse(test_MBB$pred_summary$y_actual, test_MBB$pred_summary$yhat),
             smape = Metrics::smape(test_MBB$pred_summary$y_actual, test_MBB$pred_summary$yhat),
+            # MASE: test errors scaled by naive forecast errors from training data
+            mase = calc_mase(test_MBB$pred_summary$y_actual, test_MBB$pred_summary$yhat, 
+                            train_MBB$y_actual, seasonality = config$mase_seasonality),
             r2 = round(1 - sum((test_MBB$pred_summary$y_actual - test_MBB$pred_summary$yhat)^2) / 
                          sum((test_MBB$pred_summary$y_actual - mean(test_MBB$pred_summary$y_actual))^2), 4)
           )
@@ -180,6 +187,7 @@ for (enc in names(mbb_results)) {
               mape = NA_real_,
               rse = NA_real_,
               smape = NA_real_,
+              mase = NA_real_,
               r2 = NA_real_
             )
           } else {
@@ -191,6 +199,9 @@ for (enc in names(mbb_results)) {
               mape = yardstick::mape_vec(holdout_MBB$pred_summary$y_actual, holdout_MBB$pred_summary$yhat),
               rse = Metrics::rse(holdout_MBB$pred_summary$y_actual, holdout_MBB$pred_summary$yhat),
               smape = Metrics::smape(holdout_MBB$pred_summary$y_actual, holdout_MBB$pred_summary$yhat),
+              # MASE: holdout errors scaled by naive forecast errors from training data
+              mase = calc_mase(holdout_MBB$pred_summary$y_actual, holdout_MBB$pred_summary$yhat, 
+                              train_MBB$y_actual, seasonality = config$mase_seasonality),
               r2 = round(1 - sum((holdout_MBB$pred_summary$y_actual - holdout_MBB$pred_summary$yhat)^2) / 
                            sum((holdout_MBB$pred_summary$y_actual - mean(holdout_MBB$pred_summary$y_actual))^2), 4)
             )
@@ -204,6 +215,7 @@ for (enc in names(mbb_results)) {
             mape = NA_real_,
             rse = NA_real_,
             smape = NA_real_,
+            mase = NA_real_,
             r2 = NA_real_
           )
         }
@@ -272,6 +284,7 @@ for (enc in names(mbb_results)) {
               title = paste0("Prophet + XGBoost: ", enc, " - ", exposure, " - ", cause),
               subtitle = paste0("Block length = ", result$L_block, " days, n_sim = ", result$n_sim, 
                                ", MAPE = ", round(test_metrics$mape, 2), 
+                               ", MASE = ", round(test_metrics$mase, 2),
                                ", R² = ", test_metrics$r2)
             )
         } else {
@@ -281,6 +294,7 @@ for (enc in names(mbb_results)) {
               title = paste0("Prophet + XGBoost: ", enc, " - ", exposure, " - ", cause),
               subtitle = paste0("Block length = ", result$L_block, " days, n_sim = ", result$n_sim, 
                                ", MAPE = ", round(test_metrics$mape, 2), 
+                               ", MASE = ", round(test_metrics$mase, 2),
                                ", R² = ", test_metrics$r2)
             )
         }
