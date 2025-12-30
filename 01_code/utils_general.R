@@ -136,7 +136,8 @@ validate_global_seed <- function(config) {
 #' @return Version string (e.g., "v001", "v002")
 #'
 #' @examples
-#' ver <- gen_ver_number(paste0(path_onedrive, "02_output/models/"))
+#' models_path <- get_models_path(path_onedrive, user = "lbw")
+#' ver <- gen_ver_number(models_path)
 #'
 gen_ver_number <- function(path) {
   all_dirs <- list.dirs(path, full.names = FALSE, recursive = FALSE)
@@ -203,6 +204,7 @@ read_config <- function(file_path = NULL) {
 
   # Read in YAML file -------------------------------
   config <- yaml::read_yaml(file_path)
+  config$models_to_run$cause <- paste0(config$outcome_type, "_", config$models_to_run$cause)
 
   # Handle YAML parser quirk that creates duplicate fields -------------------------------
   # When using multi-line format for models_to_run_flat, the parser creates both 
@@ -325,6 +327,39 @@ setup_parallel_processing <- function(config) {
 # Directory and File Management
 #-------------------------------
 
+#' Get models directory path with user subfolder
+#'
+#' Constructs the path to the models directory with user subfolder.
+#' Creates the user directory if it doesn't exist.
+#'
+#' @param path_onedrive Path to OneDrive directory
+#' @param user User name from config (defaults to reading from config or "default")
+#'
+#' @return Full path to models directory with user subfolder
+#'
+#' @examples
+#' models_path <- get_models_path(path_onedrive, user = "lbw")
+#'
+get_models_path <- function(path_onedrive, user = NULL) {
+  if (is.null(user)) {
+    # Try to get from config if available
+    config_file <- paste0(getwd(), "/01_code/02_analysis/model_config.yaml")
+    if (file.exists(config_file)) {
+      config <- yaml::read_yaml(config_file)
+      user <- config$user
+    }
+    if (is.null(user) || user == "") {
+      user <- "default"
+    }
+  }
+  models_path <- paste0(path_onedrive, "02_output/models/", user, "/")
+  # Create user directory if it doesn't exist
+  if (!dir.exists(models_path)) {
+    dir.create(models_path, recursive = TRUE, showWarnings = FALSE)
+  }
+  return(models_path)
+}
+
 #' Find latest model output directory
 #'
 #' Searches for model output directories matching the naming pattern:
@@ -336,7 +371,8 @@ setup_parallel_processing <- function(config) {
 #' @return Full path to the latest model output directory, or NULL if none found
 #'
 #' @examples
-#' latest_dir <- find_latest_version(paste0(path_onedrive, "02_output/models/"))
+#' models_path <- get_models_path(path_onedrive, user = "lbw")
+#' latest_dir <- find_latest_version(models_path)
 #'
 find_latest_version <- function(output_path) {
   output_dirs <- list.dirs(output_path, full.names = TRUE, recursive = FALSE)
@@ -354,17 +390,18 @@ find_latest_version <- function(output_path) {
 #' Get output directory
 #'
 #' Gets model output directory from MODEL_OUTPUT_DIR environment variable,
-#' or falls back to finding the latest version.
+#' or falls back to finding the latest version in the user's models subfolder.
 #'
 #' @param path_onedrive Path to OneDrive directory
 #' @param required If TRUE, stops with error if no directory found. If FALSE, returns NULL.
+#' @param user User name from config (defaults to reading from config or "default")
 #'
 #' @return Full path to output directory, or NULL if not found and required=FALSE
 #'
 #' @examples
 #' latest_dir <- get_output_directory(path_onedrive)
 #'
-get_output_directory <- function(path_onedrive, required = TRUE) {
+get_output_directory <- function(path_onedrive, required = TRUE, user = NULL) {
   output_dir_env <- Sys.getenv("MODEL_OUTPUT_DIR", unset = "")
   cat("MODEL_OUTPUT_DIR environment variable:", ifelse(output_dir_env == "", "(not set)", output_dir_env), "\n")
   
@@ -373,7 +410,8 @@ get_output_directory <- function(path_onedrive, required = TRUE) {
     return(output_dir_env)
   } else {
     cat("MODEL_OUTPUT_DIR not set or directory doesn't exist, falling back to find_latest_version()\n")
-    latest_dir <- find_latest_version(paste0(path_onedrive, "02_output/models/"))
+    models_path <- get_models_path(path_onedrive, user)
+    latest_dir <- find_latest_version(models_path)
     
     if (is.null(latest_dir) && required) {
       stop("No model output directories found. Please run 02_model_tune_phxgb_parallel.R first.")

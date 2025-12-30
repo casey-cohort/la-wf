@@ -8,9 +8,13 @@ pacman::p_load(tidyverse, here)
 
 # Set paths
 source(paste0(getwd(), "/01_code/paths.R"))
+source(paste0(getwd(), "/01_code/utils_general.R"))
 
 # Define models directory ----
-models_dir <- paste0(path_onedrive, "02_output/models/")
+# Read config to get user
+config_file <- paste0(getwd(), "/01_code/02_analysis/model_config.yaml")
+config <- yaml::read_yaml(config_file)
+models_dir <- get_models_path(path_onedrive, user = config$user)
 
 cat("Looking for model directories in:", models_dir, "\n\n")
 

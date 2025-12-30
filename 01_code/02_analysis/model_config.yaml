@@ -1,4 +1,7 @@
 seed: 112358
+user: 'lbw'
+outcome_type: 'rate'
+# outcome_type:'num'
 
 # Specify which models to run using ONE of the following approaches:
 #
@@ -12,21 +15,21 @@ seed: 112358
 # models_to_run:
 #   encounter_type: ["IP", "ED"]
 #   exposure_category: ["evac", "high_smoke", "mid_smoke", "none"]
-#   cause: ["num_enc", "num_enc_resp", "num_enc_cardio", "num_enc_injury", "num_enc_neuro"]
+#   cause: ["enc", "enc_resp", "enc_cardio", "enc_injury", "enc_neuro"]
 
-# models_to_run:
-# encounter_type: ["ED"]
-# exposure_category: ["mid_smoke"]
-# cause: ["num_enc_cardio"]
+models_to_run:
+  encounter_type: ["ED"]
+  exposure_category: ["mid_smoke"]
+  cause: ["enc_cardio"]
   
 # OPTION 2: Currently active (comment out to use models_to_run instead)
-models_to_run_flat:
-  - encounter_type: "IP"
-    exposure_category: "evac"
-    cause: "num_enc_resp"
-  - encounter_type: "ED"
-    exposure_category: "mid_smoke"
-    cause: "num_enc_cardio"
+# models_to_run_flat:
+#   - encounter_type: "IP"
+#     exposure_category: "evac"
+#     cause: "enc_resp"
+#   - encounter_type: "ED"
+#     exposure_category: "mid_smoke"
+#     cause: "enc_cardio"
 
 grid_params:
   # XGBoost parameters - more conservative to reduce overfitting

@@ -16,13 +16,25 @@ pacman::p_load(tidyverse, readr, tidyr, purrr, lubridate, MMWRweek, here, arrow)
 # set paths
 source(paste0(getwd(), "/01_code/paths.R"))
 
+# merge denoms with df_temp
+# 1. pull out year and month in df_temp
+# 2. merge with denoms on year and month
+# 3. divide num_enc by denom to get rate
+# 4. add rate to df_temp
+
 #-------------------------------
 # load data
-df_temp <- read_csv(paste0(path_onedrive, "01_data/01_raw/ed_ipt_dat/2025-08-08/ENC_EXP_DAILY_08082025.csv")) %>% 
+df_temp <- read_csv(paste0(path_onedrive, "01_data/01_raw/ed_ipt_dat/2025-08-08/ENC_EXP_DAILY_2025-08-08.csv")) %>% 
    # clean names so there are no spaces
    mutate(exposure_category = str_replace_all(exposure_category, ",.*", ""),
          exposure_category = str_replace_all(exposure_category, " ", "_"),
          exposure_category = ifelse(exposure_category == "no_smoke", "none", exposure_category))
+
+# load denoms 
+denoms <- read_excel(paste0(path_onedrive, "01_data/01_raw/ed_ipt_dat/2025-12-30/denoms_enc_exp_daily_2025-12-30.xlsx")) %>%
+  mutate(exposure_category = str_replace_all(exposure_category, ",.*", "")) %>%
+  mutate(exposure_category = str_replace_all(exposure_category, " ", "_")) %>% 
+  mutate(exposure_category = ifelse(exposure_category == "no_smoke", "none", exposure_category))
 
 # resp covs
 resp_virus<- read_csv(paste0(path_onedrive, "01_data/02_processed/wastewater_resp_illness_data/2025-09-02/resp-virus-dat_all.csv"))
@@ -82,9 +94,22 @@ out_df <- df %>%
          num_enc_cardio, num_enc_resp, num_enc_neuro, num_enc_injury,
           pr, tmmx, tmmn, rmin, rmax, vs, srad, time_period, `influenza-a`, `influenza-b`, rsv, `sars-cov2`)
 
+#--------------------------------
+# create rates dataset
+df_rates <- out_df %>%
+  mutate(encounter_dt = as.Date(encounter_dt, format = "%m/%d/%Y")) %>%
+  mutate(year = year(encounter_dt),
+         month = month(encounter_dt)) %>%
+  left_join(denoms, by = c("year", "month", "exposure_category")) %>%
+  mutate(rate_enc = (num_enc / N) * 100000, 
+         rate_enc_cardio = (num_enc_cardio / N) * 100000,
+         rate_enc_resp = (num_enc_resp / N) * 100000,
+         rate_enc_neuro = (num_enc_neuro / N) * 100000,
+         rate_enc_injury = (num_enc_injury / N) * 100000)
+
 #-------------------------------
 # create training and testing dataset
-df_train_test <- out_df %>%
+df_train_test <- df_rates %>%
   mutate(
     date = as.Date(encounter_dt),
     month_day = format(date, "%m-%d"),
@@ -107,7 +132,7 @@ write_parquet(df_train_test, paste0(path_onedrive, paste0( "01_data/02_processed
 
 #-------------------------------
 # create all cases dataset
-df_all_cases <- out_df %>%
+df_all_cases <- df_rates %>%
   mutate(
     date = as.Date(encounter_dt),
     month_day = format(date, "%m-%d"),
