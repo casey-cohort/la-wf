@@ -130,7 +130,10 @@ cat("Total execution time:", round(total_executed_time, 2), "minutes\n")
 cat("Total execution time:", round(total_executed_time / 60, 2), "hours\n\n")
 
 # Find output directory (using new naming pattern)
-latest_dir <- find_latest_version(paste0(path_onedrive, "02_output/models/"))
+# Read config to get user
+config <- read_config(paste0(path_repo, "01_code/02_analysis/model_config.yaml"))
+models_path <- get_models_path(path_onedrive, user = config$user)
+latest_dir <- find_latest_version(models_path)
 
 cat("Results saved to:\n")
 cat("  ", latest_dir, "\n\n")

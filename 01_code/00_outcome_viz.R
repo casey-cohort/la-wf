@@ -15,7 +15,7 @@ source(paste0(getwd(), "/01_code/paths.R"))
 
 #-------------------------------
 # load data
-df_temp <- read_csv(paste0(path_onedrive, "01_data/01_raw/ed_ipt_dat/2025-08-08/ENC_EXP_DAILY_08082025.csv")) %>% 
+df_temp <- read_csv(paste0(path_onedrive, "01_data/01_raw/ed_ipt_dat/2025-08-08/ENC_EXP_DAILY_2025-08-08.csv")) %>% 
    # clean names so there are no spaces
    mutate(exposure_category = str_replace_all(exposure_category, ",.*", ""),
          exposure_category = str_replace_all(exposure_category, " ", "_"),
