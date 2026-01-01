@@ -1,5 +1,5 @@
 seed: 112358
-user: 'lbw'
+user: 'akd'
 outcome_type: 'rate'
 # outcome_type:'num'
 
@@ -17,19 +17,19 @@ outcome_type: 'rate'
 #   exposure_category: ["evac", "high_smoke", "mid_smoke", "none"]
 #   cause: ["enc", "enc_resp", "enc_cardio", "enc_injury", "enc_neuro"]
 
-models_to_run:
-  encounter_type: ["ED"]
-  exposure_category: ["mid_smoke"]
-  cause: ["enc_cardio"]
-  
+# models_to_run:
+#   encounter_type: ["ED"]
+#   exposure_category: ["mid_smoke", "high_smoke", "none"]
+#   cause: ["enc"]
+
 # OPTION 2: Currently active (comment out to use models_to_run instead)
-# models_to_run_flat:
-#   - encounter_type: "IP"
-#     exposure_category: "evac"
-#     cause: "enc_resp"
-#   - encounter_type: "ED"
-#     exposure_category: "mid_smoke"
-#     cause: "enc_cardio"
+models_to_run_flat:
+  - encounter_type: "ED"
+    exposure_category: "mid_smoke"
+    cause: "enc"
+  - encounter_type: "ED"
+    exposure_category: "none"
+    cause: "enc_injury"
 
 grid_params:
   # XGBoost parameters - more conservative to reduce overfitting
@@ -37,23 +37,23 @@ grid_params:
     range: [10, 32]
     tune: true
   min_n:
-    range: [5, 30]
+    range: [1, 30]
     tune: true
   tree_depth:
-    range: [3, 8]
+    range: [3, 12]
     tune: true
   learn_rate:
     range: [0.01, 0.1]
     tune: true
   loss_reduction:
-    range: [-5, 1]
+    range: [-6, 1]
     tune: true
   stop_iter:
     range: [10, 50]
     tune: true
   # New XGBoost parameters for regularization
   trees:
-    range: [8, 25] # default is 15
+    range: [1, 30] # default is 15
     tune: true
   sample_size:
     range: [0.6, 1.0] # default is 1
@@ -79,7 +79,7 @@ train_test_params:
 # can give a list of combinations so we can try many things -- so maybe increments of 5 and all combos.
 
 # Grid size for hyperparameter tuning
-grid_size: 100
+grid_size: 400
 
 # Number of moving block bootstrap simulations for confidence intervals
 n_sim_mbb: 100

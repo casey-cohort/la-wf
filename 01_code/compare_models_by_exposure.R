@@ -15,16 +15,17 @@ source(paste0(getwd(), "/01_code/utils_general.R"))
 config_file <- paste0(getwd(), "/01_code/02_analysis/model_config.yaml")
 config <- yaml::read_yaml(config_file)
 models_dir <- get_models_path(path_onedrive, user = config$user)
-
+# go one directory up to get the parent directory
+models_dir <- dirname(models_dir)
 cat("Looking for model directories in:", models_dir, "\n\n")
 
 # Define subdirectories to search (akd and lbw)
 subdirs <- c("akd", "lbw")
-
+subdir <- "akd"
 # Find all model directories across subdirectories ----
 model_dirs <- list()
 for (subdir in subdirs) {
-  subdir_path <- paste0(models_dir, subdir, "/")
+  subdir_path <- paste0(models_dir, "/", subdir, "/")
   if (dir.exists(subdir_path)) {
     all_dirs <- list.dirs(subdir_path, full.names = TRUE, recursive = FALSE)
     # Accept all directories (no filtering)
@@ -163,5 +164,31 @@ cat("Total records in comparison:", nrow(combined_metrics), "\n")
 cat("\n")
 
 # Save output ----
-output_file <- paste0(models_dir, "model_comparison.csv")
+output_file <- paste0(models_dir, "/", "model_comparison.csv")
 write.csv(combined_metrics, output_file, row.names = FALSE)
+
+
+# Step-2: Identify best models
+# Read the model_comparison.csv file (or use the dataframe already in memory)
+best_models <- combined_metrics %>%
+  group_by(enc_type, exposure_category, cause) %>%
+  mutate(
+    # Create a helper column: use R2 if not NA, otherwise use -Inf
+    r2_for_sorting = if_else(is.na(R2), -Inf, R2),
+    # Check if all R2 values in this group are NA
+    all_na = all(is.na(R2))
+  ) %>%
+  # If all NA, keep first row; otherwise keep row with max R2
+  slice(if (first(all_na)) 1 else which.max(r2_for_sorting)) %>%
+  ungroup() %>%
+  select(-r2_for_sorting, -all_na)
+
+cat("=== Best Models Selection ===\n")
+cat("Total unique combinations:", nrow(best_models), "\n")
+cat("Combinations with valid R2:", sum(!is.na(best_models$R2)), "\n")
+cat("Combinations with NA R2 (first row selected):", sum(is.na(best_models$R2)), "\n\n")
+
+# Save best models output
+best_models_file <- paste0(models_dir, "/", "model_comparison_best.csv")
+write.csv(best_models, best_models_file, row.names = FALSE)
+cat("Best models saved to:", best_models_file, "\n")

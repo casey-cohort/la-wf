@@ -204,20 +204,43 @@ read_config <- function(file_path = NULL) {
 
   # Read in YAML file -------------------------------
   config <- yaml::read_yaml(file_path)
-  config$models_to_run$cause <- paste0(config$outcome_type, "_", config$models_to_run$cause)
-
+  
   # Handle YAML parser quirk that creates duplicate fields -------------------------------
   # When using multi-line format for models_to_run_flat, the parser creates both 
   # models_to_run and models_to_run_flat as references to the same object
+  # CHECK THIS BEFORE MODIFYING models_to_run!
   yaml_parser_created_duplicate <- FALSE
   if(!is.null(config$models_to_run) & !is.null(config$models_to_run_flat)){
     # Check if they're identical (YAML parsing quirk with multi-line format)
     if(identical(config$models_to_run, config$models_to_run_flat)){
       # Mark this as a parser quirk (they're the same object, use models_to_run_flat)
       yaml_parser_created_duplicate <- TRUE
+      # Remove the duplicate to avoid confusion
+      config$models_to_run <- NULL
     } else {
       # If they're different, user specified both which is an error
       stop("Error: Must provide only one of 'models_to_run' (cartesian product) or 'models_to_run_flat' (explicit list) in the config file.")
+    }
+  }
+  
+  # Only modify models_to_run if it exists and is NOT a parser duplicate
+  if(!is.null(config$models_to_run) & !yaml_parser_created_duplicate){
+    config$models_to_run$cause <- paste0(config$outcome_type, "_", config$models_to_run$cause)
+  }
+
+  # Apply prefix to models_to_run_flat if it was provided directly (not generated from models_to_run)
+  if(!is.null(config$models_to_run_flat) & (is.null(config$models_to_run) | yaml_parser_created_duplicate)){
+    # Check if any cause already has the prefix (to avoid double-prefixing)
+    has_prefix <- any(sapply(config$models_to_run_flat, function(x) {
+      grepl(paste0("^", config$outcome_type, "_"), x$cause)
+    }))
+    
+    # Only apply prefix if causes don't already have it
+    if(!has_prefix){
+      config$models_to_run_flat <- lapply(config$models_to_run_flat, function(x) {
+        x$cause <- paste0(config$outcome_type, "_", x$cause)
+        return(x)
+      })
     }
   }
 
