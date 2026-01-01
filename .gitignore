@@ -55,5 +55,9 @@ po/*~
 # RStudio Connect folder
 rsconnect/
 
-
+# macOS files
 .DS_Store
+
+# Quarto files related to params.md
+params_files/*
+params.html
