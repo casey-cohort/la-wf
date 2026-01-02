@@ -349,9 +349,15 @@ generate_MBB_CIs_tidymodels <- function(wflw_fit,
     ds = as.Date(target_df$date),
     y_actual = target_df[[outcome_col]],
     yhat = original_pred,
-    conf_lo = apply(pred_matrix, 1, quantile, probs = 0.025, na.rm = TRUE),
-    conf_hi = apply(pred_matrix, 1, quantile, probs = 0.975, na.rm = TRUE)
-  )
+    # CIs using quantile approach; will lead to asymmetric CIs
+    # conf_lo = apply(pred_matrix, 1, quantile, probs = 0.025, na.rm = TRUE),
+    # conf_hi = apply(pred_matrix, 1, quantile, probs = 0.975, na.rm = TRUE)
+    # CIs using SD of bootstrap distribution; will lead to symmetric CIs
+    bootstrap_sd = apply(pred_matrix, 1, sd, na.rm = TRUE),
+    conf_lo = original_pred - 1.96 * bootstrap_sd,
+    conf_hi = original_pred + 1.96 * bootstrap_sd
+  ) |>
+  dplyr::select(-bootstrap_sd)  # Remove intermediate column
   
   cat("  Point estimates from original model: ", sum(!is.na(pred_summary$yhat)), "out of", nrow(pred_summary), "\n")
   
