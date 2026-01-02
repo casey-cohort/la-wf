@@ -63,10 +63,16 @@ write.csv(combined_metrics, output_file, row.names = FALSE)
 cat("=== Step 2: Identify Best Models ===\n")
 best_models <- identify_best_models(combined_metrics)
 
+# Ensure only one row per combination (safety check)
+best_models <- best_models %>%
+  group_by(enc_type, exposure_category, cause) %>%
+  slice(1) %>%
+  ungroup()
+
 # Save best models output
 best_models_file <- paste0(models_dir, "/", "model_comparison_best.csv")
 write.csv(best_models, best_models_file, row.names = FALSE)
-cat("\n")
+cat("  Best models:", nrow(best_models), "unique combinations\n\n")
 
 #-------------------------------
 # Step-3: Extract PDFs and configs for best models
@@ -76,13 +82,18 @@ bested_dir <- paste0(models_dir, "/bested/")
 extract_best_model_files(best_models, models_dir, bested_dir)
 
 #-------------------------------
-# Step-4: Identify models with R2 above threshold
+# Step-4: Identify bested models with R2 above threshold
 #-------------------------------
-cat("=== Step 4: Filter Models by R2 Threshold ===\n")
+cat("=== Step 4: Filter Bested Models by R2 Threshold ===\n")
 r2_threshold <- 0.15  # Adjust this value as needed
 
-# Filter models with R2 above threshold
-r2_above_threshold <- filter_models_by_r2(combined_metrics, r2_threshold)
+# Filter bested models (best model per combination) with R2 above threshold
+# Ensure only one row per combination (safety check)
+r2_above_threshold <- best_models %>%
+  filter(!is.na(R2) & R2 > r2_threshold) %>%
+  group_by(enc_type, exposure_category, cause) %>%
+  slice(1) %>%
+  ungroup()
 
 # Get unique combinations that meet threshold
 unique_combinations_threshold <- r2_above_threshold %>%
@@ -91,7 +102,7 @@ unique_combinations_threshold <- r2_above_threshold %>%
 # Print diagnostics
 print_threshold_diagnostics(unique_combinations, unique_combinations_threshold)
 
-# Save models with R2 above threshold
+# Save bested models with R2 above threshold
 r2_above_threshold_file <- paste0(models_dir, "/", "model_comparison_r2_above_threshold.csv")
 write.csv(r2_above_threshold, r2_above_threshold_file, row.names = FALSE)
 

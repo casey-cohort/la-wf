@@ -402,7 +402,7 @@ identify_best_models <- function(combined_metrics) {
 #' @return NULL (files are written to disk)
 #'
 extract_best_model_files <- function(best_models_df, models_dir, bested_dir) {
-  # Create bested directory
+  # Create bested directory if it doesn't exist
   dir.create(bested_dir, recursive = TRUE, showWarnings = FALSE)
   
   # Track success/failure counts
@@ -410,6 +410,7 @@ extract_best_model_files <- function(best_models_df, models_dir, bested_dir) {
   pdf_failed <- 0
   config_success <- 0
   config_failed <- 0
+  files_replaced <- 0
   
   # Process each best model
   for (i in 1:nrow(best_models_df)) {
@@ -434,6 +435,17 @@ extract_best_model_files <- function(best_models_df, models_dir, bested_dir) {
     
     # Create common filename prefix so PDF and YAML sort together
     file_prefix <- paste0(enc_type, "_", exposure_category, "_", cause, "_", source_dir, "_", version)
+    
+    # Pattern to match any existing files for this model combination (regardless of version)
+    # This allows us to replace old versions with new best models
+    combination_pattern <- paste0("^", enc_type, "_", exposure_category, "_", cause, "_.*")
+    
+    # Remove existing files for this combination before adding new ones
+    existing_files <- list.files(bested_dir, pattern = combination_pattern, full.names = TRUE)
+    if (length(existing_files) > 0) {
+      file.remove(existing_files)
+      files_replaced <- files_replaced + length(existing_files)
+    }
     
     # Copy PDF if it exists
     if (file.exists(pdf_source)) {
@@ -475,6 +487,9 @@ extract_best_model_files <- function(best_models_df, models_dir, bested_dir) {
   }
   
   # Print summary
+  if (files_replaced > 0) {
+    cat("  Replaced", files_replaced, "existing file(s) with updated best models\n")
+  }
   cat("  Extracted", pdf_success, "PDFs")
   if (pdf_failed > 0) cat(" (", pdf_failed, " failed)", sep = "")
   cat("\n")

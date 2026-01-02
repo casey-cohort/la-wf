@@ -48,8 +48,14 @@ options(scipen = 999)
 # set global seed for arg to tuning function
 global_seed <- config$seed
 
-# train test data to use -- datasets are in dated folders; prompt user for version with validation
-train_test_path <- get_train_test_data_path(path_onedrive, prompt_user = TRUE)
+# train test data to use -- datasets are in dated folders
+# Check if TRAIN_TEST_DATE env var is set (from run_pipeline), otherwise prompt user
+train_test_date_env <- Sys.getenv("TRAIN_TEST_DATE", unset = "")
+if (train_test_date_env != "") {
+  train_test_path <- get_train_test_data_path(path_onedrive, prompt_user = FALSE, date = train_test_date_env)
+} else {
+  train_test_path <- get_train_test_data_path(path_onedrive, prompt_user = TRUE)
+}
 
 # Store train/test date in environment variable for use by subsequent pipeline steps
 train_test_date <- basename(train_test_path)
