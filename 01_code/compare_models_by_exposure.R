@@ -1,28 +1,25 @@
-#-------------------------------
 # LA wildfires project
 # Compare model performance across all exposure versions
-#-------------------------------
 
-# Setup ----
+# Initial Setup ----
 pacman::p_load(tidyverse, here)
-
-# Set paths
+## Set paths
 source(paste0(getwd(), "/01_code/paths.R"))
 source(paste0(getwd(), "/01_code/utils_general.R"))
-
-# Define models directory ----
-# Read config to get user
+## Read config to get user
 config_file <- paste0(getwd(), "/01_code/02_analysis/model_config.yaml")
 config <- yaml::read_yaml(config_file)
-models_dir <- get_models_path(path_onedrive, user = config$user)
-# go one directory up to get the parent directory
-models_dir <- dirname(models_dir)
+outcome_type <- config$outcome_type
+
+# Step-1: Extract and combine all metrics ----
+## Go one directory up to get the parent directory
+models_dir <- here(path_onedrive, "02_output/models/")
 cat("Looking for model directories in:", models_dir, "\n\n")
 
-# Define subdirectories to search (akd and lbw)
+## Define subdirectories to search (akd and lbw)
 subdirs <- c("akd", "lbw")
-subdir <- "akd"
-# Find all model directories across subdirectories ----
+
+## Find all model directories across subdirectories
 model_dirs <- list()
 for (subdir in subdirs) {
   subdir_path <- paste0(models_dir, "/", subdir, "/")
@@ -49,7 +46,7 @@ if (length(model_dirs) == 0) {
   stop("No model directories found in ", models_dir, " subdirectories (akd, lbw)")
 }
 
-# Process each directory ----
+## Process each directory
 all_metrics_list <- list()
 # model_dir_info <- model_dirs[[1]]
 for (model_dir_info in model_dirs) {
@@ -99,10 +96,10 @@ for (model_dir_info in model_dirs) {
         R2 = r2,
         MAPE = mape,
         sMAPE = smape,
-        # MASE = mase,
+        MASE = mase,
         window
       )
-    
+
     cat("  Found", nrow(test_metrics), "test window records\n")
     
     # Add to list
@@ -115,36 +112,37 @@ for (model_dir_info in model_dirs) {
 
 cat("\n")
 
-# Combine all results ----
+## Combine all results
 if (length(all_metrics_list) == 0) {
   stop("No metrics data could be extracted from any model directories")
 }
 
 combined_metrics <- bind_rows(all_metrics_list)
 
-# Create complete grid of all possible combinations ----
-cat("Creating complete grid of all combinations...\n")
+## Filter out cases where cause does not start with outcome_type
+combined_metrics <- combined_metrics %>%
+  filter(grepl(paste0("^", outcome_type, "_"), cause))
 
-# Get all unique (source_dir, version) pairs that actually exist
+## Get all unique (source_dir, version) pairs that actually exist
 unique_dir_version_pairs <- combined_metrics %>%
   distinct(source_dir, version)
 
-# Get all unique combinations of enc_type, exposure_category, cause across all data
+## Get all unique combinations of enc_type, exposure_category, cause across all data
 unique_combinations <- combined_metrics %>%
   distinct(enc_type, exposure_category, cause)
 
 cat("  Unique directory/version pairs:", nrow(unique_dir_version_pairs), "\n")
 cat("  Unique combinations (enc_type × exposure_category × cause):", nrow(unique_combinations), "\n")
 
-# For each directory/version pair, create rows for all combinations
+## For each directory/version pair, create rows for all combinations
 complete_grid <- unique_dir_version_pairs %>%
   crossing(unique_combinations)
 
 cat("  Total rows in complete grid:", nrow(complete_grid), "\n")
 cat("  (", nrow(unique_dir_version_pairs), "versions ×", nrow(unique_combinations), "combinations )\n")
 
-# Left join actual data onto complete grid
-# This fills missing combinations with NA
+## Left join actual data onto complete grid
+## This fills missing combinations with NA
 combined_metrics <- complete_grid %>%
   left_join(
     combined_metrics, 
@@ -154,41 +152,86 @@ combined_metrics <- complete_grid %>%
 cat("  Combinations with actual data:", sum(!is.na(combined_metrics$R2)), "\n")
 cat("  Combinations with missing data:", sum(is.na(combined_metrics$R2)), "\n\n")
 
-# Sort by source directory, version, then by combination details
+## Sort by source directory, version, then by combination details
 combined_metrics <- combined_metrics %>%
-  arrange(enc_type, exposure_category, cause, source_dir, version)
+  arrange(enc_type, exposure_category, cause, source_dir, desc(version))
 
 cat("=== Summary ===\n")
 cat("Total versions processed:", length(all_metrics_list), "\n")
 cat("Total records in comparison:", nrow(combined_metrics), "\n")
 cat("\n")
 
-# Save output ----
+## Save output
 output_file <- paste0(models_dir, "/", "model_comparison.csv")
 write.csv(combined_metrics, output_file, row.names = FALSE)
 
-
-# Step-2: Identify best models
-# Read the model_comparison.csv file (or use the dataframe already in memory)
+# Step-2: Identify best models ---- 
+## Use the combined_metrics dataframe to identify the best models
 best_models <- combined_metrics %>%
   group_by(enc_type, exposure_category, cause) %>%
   mutate(
-    # Create a helper column: use R2 if not NA, otherwise use -Inf
-    r2_for_sorting = if_else(is.na(R2), -Inf, R2),
-    # Check if all R2 values in this group are NA
-    all_na = all(is.na(R2))
+    # Flag models with positive R2
+    has_positive_r2 = !is.na(R2) & R2 > 0,
+    # Flag models with valid MAPE (not NA and finite, excludes Inf)
+    has_valid_smape = !is.na(sMAPE), # removed '& is.finite(MAPE)'
+    # Flag valid models (both positive R2 and valid MAPE)
+    is_valid_model = has_positive_r2 & has_valid_smape,
+    # Check if any valid models exist in this group
+    has_any_valid = any(has_positive_r2)
   ) %>%
-  # If all NA, keep first row; otherwise keep row with max R2
-  slice(if (first(all_na)) 1 else which.max(r2_for_sorting)) %>%
+  # Select best model: if valid models exist, pick lowest sMAPE; otherwise keep first row and set metrics to NA
+  group_modify(~ {
+    if (.x$has_any_valid[1]) {
+      # Filter to valid models and select lowest sMAPE
+      .x %>%
+        filter(is_valid_model) %>%
+        slice_min(sMAPE, n = 1, with_ties = FALSE)
+    } else {
+      # No valid models - keep first row but set metrics to NA
+      .x %>%
+        slice(1) %>%
+        mutate(R2 = NA_real_, MAPE = NA_real_, sMAPE = NA_real_)
+    }
+  }) %>%
   ungroup() %>%
-  select(-r2_for_sorting, -all_na)
+  select(-has_positive_r2, -has_valid_smape, -is_valid_model, -has_any_valid)
 
-cat("=== Best Models Selection ===\n")
-cat("Total unique combinations:", nrow(best_models), "\n")
-cat("Combinations with valid R2:", sum(!is.na(best_models$R2)), "\n")
-cat("Combinations with NA R2 (first row selected):", sum(is.na(best_models$R2)), "\n\n")
-
-# Save best models output
+## Save best models output
 best_models_file <- paste0(models_dir, "/", "model_comparison_best.csv")
 write.csv(best_models, best_models_file, row.names = FALSE)
 cat("Best models saved to:", best_models_file, "\n")
+
+# Step-3: Identify models with R2 above threshold ---- 
+## Set R2 threshold (models with R2 above this threshold will be kept)
+r2_threshold <- 0.15  # Adjust this value as needed
+
+## Use the combined_metrics dataframe to identify models with R2 above threshold
+r2_above_threshold <- combined_metrics %>%
+  group_by(enc_type, exposure_category, cause) %>%
+  mutate(
+    # Flag models with R2 above threshold
+    is_valid_model = !is.na(R2) & R2 > r2_threshold,
+  ) %>%
+  # Filter to keep all models that meet the R2 threshold
+  filter(is_valid_model) %>%
+  ungroup() %>%
+  select(-is_valid_model)
+
+## Unique combinations of enc_type, exposure_category, cause
+unique_combinations_threshold <- r2_above_threshold %>%
+  distinct(enc_type, exposure_category, cause)
+
+cat("  Unique combinations (enc_type × exposure_category × cause):", nrow(unique_combinations), "\n")
+
+## Combinations that dont meet the threshold
+unique_combinations_not_threshold <- unique_combinations %>%
+  anti_join(unique_combinations_threshold, by = c("enc_type", "exposure_category", "cause"))
+
+cat("  Combinations that dont meet the threshold:\n", nrow(unique_combinations_not_threshold), "\n")
+print(unique_combinations_not_threshold)
+
+
+## Save models with R2 above threshold
+r2_above_threshold_file <- paste0(models_dir, "/", "model_comparison_r2_above_threshold.csv")
+write.csv(r2_above_threshold, r2_above_threshold_file, row.names = FALSE)
+cat("Models with R2 >", r2_threshold, "saved to:", r2_above_threshold_file, "\n")
