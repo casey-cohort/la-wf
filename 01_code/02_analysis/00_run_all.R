@@ -58,8 +58,8 @@ run_timed_step <- function(step_num, step_name, script_path, ...) {
 
 # Setup ----
 source(paste0(getwd(), "/01_code/paths.R"))
-source(paste0(getwd(), "/01_code/utils_general.R"))
-source(paste0(getwd(), "/01_code/utils_tuning.R"))
+source(paste0(getwd(), "/01_code/00_utils/utils_general.R"))
+source(paste0(getwd(), "/01_code/00_utils/utils_tuning.R"))
 
 # Ensure parallel resources are cleaned up on exit (even if pipeline fails)
 on.exit(future::plan(future::sequential), add = TRUE)

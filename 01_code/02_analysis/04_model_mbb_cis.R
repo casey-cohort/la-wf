@@ -12,9 +12,9 @@ pacman::p_load(tidymodels, modeltime, tidyverse, timetk, arrow, boot, tictoc, fu
 
 # Set paths and source utilities
 source(paste0(getwd(), "/01_code/paths.R"))
-source(paste0(getwd(), "/01_code/utils_general.R"))
-source(paste0(getwd(), "/01_code/utils_tuning.R"))
-source(paste0(getwd(), "/01_code/utils_mbb.R"))
+source(paste0(getwd(), "/01_code/00_utils/utils_general.R"))
+source(paste0(getwd(), "/01_code/00_utils/utils_tuning.R"))
+source(paste0(getwd(), "/01_code/00_utils/utils_mbb.R"))
 
 # Read config to get n_sim_mbb
 # read_config() automatically handles TEST_CONFIG_PATH environment variable

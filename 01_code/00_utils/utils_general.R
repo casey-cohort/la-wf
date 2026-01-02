@@ -25,7 +25,7 @@ validate_seed_reproducibility <- function(global_seed, markers, n_iterations = 1
   
   # Source gen_seed if not available
   if (!exists("gen_seed")) {
-    source(paste0(getwd(), "/01_code/utils_tuning.R"))
+    source(paste0(getwd(), "/01_code/00_utils/utils_tuning.R"))
   }
   
   cat("Testing seed reproducibility...\n")
@@ -69,7 +69,7 @@ log_seed_derivation <- function(global_seed, markers, verbose = TRUE) {
   
   # Source gen_seed if not available
   if (!exists("gen_seed")) {
-    source(paste0(getwd(), "/01_code/utils_tuning.R"))
+    source(paste0(getwd(), "/01_code/00_utils/utils_tuning.R"))
   }
   
   derived_seed <- gen_seed(global_seed, markers)

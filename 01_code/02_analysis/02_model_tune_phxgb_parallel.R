@@ -20,8 +20,8 @@ pacman::p_load(modeltime, tidymodels, tidyverse, timetk, Metrics,
 
 # set paths 
 source(paste0(getwd(), "/01_code/paths.R"))
-source(paste0(getwd(), "/01_code/utils_general.R"))
-source(paste0(getwd(), "/01_code/utils_tuning.R"))
+source(paste0(getwd(), "/01_code/00_utils/utils_general.R"))
+source(paste0(getwd(), "/01_code/00_utils/utils_tuning.R"))
 
 # read config (TEST_CONFIG_PATH env var will override if set for parallel testing)
 config <- read_config(paste0(path_repo, "01_code/02_analysis/model_config.yaml"))
