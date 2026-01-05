@@ -353,41 +353,51 @@ combine_and_expand_metrics <- function(all_metrics_list, outcome_type) {
 }
 
 
-#' Identify best models based on sMAPE
+#' Identify best models based on specified metric
 #'
 #' @param combined_metrics Combined metrics data frame
+#' @param r2_threshold R2 threshold value (default = 0)
+#' @param metric Metric to use for selecting best model: "sMAPE" or "MASE" (default = "sMAPE")
 #'
 #' @return Data frame with best model for each combination
 #'
-identify_best_models <- function(combined_metrics) {
+identify_best_models <- function(combined_metrics, r2_threshold = 0, metric = "sMAPE") {
+  # Validate metric parameter
+  if (!metric %in% c("sMAPE", "MASE")) {
+    stop("metric must be either 'sMAPE' or 'MASE'")
+  }
+  
+  # Get the metric column name
+  metric_col <- if (metric == "sMAPE") "sMAPE" else "MASE"
+  
   best_models <- combined_metrics %>%
     group_by(enc_type, exposure_category, cause) %>%
     mutate(
-      # Flag models with positive R2
-      has_positive_r2 = !is.na(R2) & R2 > 0,
-      # Flag models with valid sMAPE
-      has_valid_smape = !is.na(sMAPE),
-      # Flag valid models (both positive R2 and valid sMAPE)
-      is_valid_model = has_positive_r2 & has_valid_smape,
+      # Flag models with R2 above threshold
+      has_r2_above_threshold = !is.na(R2) & R2 > r2_threshold,
+      # Flag models with valid metric
+      has_valid_metric = !is.na(!!sym(metric_col)),
+      # Flag valid models (both R2 above threshold and valid metric)
+      is_valid_model = has_r2_above_threshold & has_valid_metric,
       # Check if any valid models exist in this group
-      has_any_valid = any(has_positive_r2)
+      has_any_valid = any(has_r2_above_threshold)
     ) %>%
-    # Select best model: if valid models exist, pick lowest sMAPE; otherwise keep first row and set metrics to NA
+    # Select best model: if valid models exist, pick lowest metric; otherwise keep first row and set metrics to NA
     group_modify(~ {
       if (.x$has_any_valid[1]) {
-        # Filter to valid models and select lowest sMAPE
+        # Filter to valid models and select lowest metric
         .x %>%
           filter(is_valid_model) %>%
-          slice_min(sMAPE, n = 1, with_ties = FALSE)
+          slice_min(.data[[metric_col]], n = 1, with_ties = TRUE)
       } else {
         # No valid models - keep first row but set metrics to NA
         .x %>%
           slice(1) %>%
-          mutate(R2 = NA_real_, MAPE = NA_real_, sMAPE = NA_real_)
+          mutate(R2 = NA_real_, MAPE = NA_real_, sMAPE = NA_real_, MASE = NA_real_)
       }
     }) %>%
     ungroup() %>%
-    select(-has_positive_r2, -has_valid_smape, -is_valid_model, -has_any_valid)
+    select(-has_r2_above_threshold, -has_valid_metric, -is_valid_model, -has_any_valid)
   
   return(best_models)
 }

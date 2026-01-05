@@ -61,7 +61,7 @@ write.csv(combined_metrics, output_file, row.names = FALSE)
 # Step-2: Identify best models
 #-------------------------------
 cat("=== Step 2: Identify Best Models ===\n")
-best_models <- identify_best_models(combined_metrics)
+best_models <- identify_best_models(combined_metrics, r2_threshold = 0, metric = "MASE")
 
 # Ensure only one row per combination (safety check)
 best_models <- best_models %>%
