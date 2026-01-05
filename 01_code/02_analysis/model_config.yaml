@@ -1,5 +1,5 @@
 seed: 112358
-user: 'akd'
+user: 'lbw'
 outcome_type: 'rate'
 # outcome_type:'num'
 
@@ -12,24 +12,16 @@ outcome_type: 'rate'
 # IMPORTANT: Use multi-line format for models_to_run_flat (as shown below).
 
 # OPTION 1: Uncomment to use cartesian product
-models_to_run:
-  encounter_type: ["IP"]
-  exposure_category: ["evac", "high_smoke", "mid_smoke", "none"]
-  cause: ["enc", "enc_resp", "enc_cardio", "enc_injury", "enc_neuro"]
-
 # models_to_run:
-#   encounter_type: ["IP"]
-#   exposure_category: ["none", "mid_smoke"]
-#   cause: ["enc_neuro"]
+#   encounter_type: ["ED"]
+#   exposure_category: ["evac", "high_smoke", "mid_smoke", "none"]
+#   cause: ["enc", "enc_resp", "enc_cardio", "enc_injury", "enc_neuro"]
 
 # OPTION 2: Currently active (comment out to use models_to_run instead)
-# models_to_run_flat:
-#   - encounter_type: "ED"
-#     exposure_category: "mid_smoke"
-#     cause: "enc"
-#   - encounter_type: "ED"
-#     exposure_category: "none"
-#     cause: "enc_injury"
+models_to_run_flat:
+  - encounter_type: "ED"
+    exposure_category: "high_smoke"
+    cause: "enc"
 
 grid_params:
   # XGBoost parameters - more conservative to reduce overfitting

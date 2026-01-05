@@ -20,8 +20,8 @@ pacman::p_load(modeltime, tidymodels, tidyverse, timetk, Metrics,
 
 # set paths 
 source(paste0(getwd(), "/01_code/paths.R"))
-source(paste0(getwd(), "/01_code/utils_general.R"))
-source(paste0(getwd(), "/01_code/utils_tuning.R"))
+source(paste0(getwd(), "/01_code/00_utils/utils_general.R"))
+source(paste0(getwd(), "/01_code/00_utils/utils_tuning.R"))
 
 # read config (TEST_CONFIG_PATH env var will override if set for parallel testing)
 config <- read_config(paste0(path_repo, "01_code/02_analysis/model_config.yaml"))
@@ -48,8 +48,14 @@ options(scipen = 999)
 # set global seed for arg to tuning function
 global_seed <- config$seed
 
-# train test data to use -- datasets are in dated folders; prompt user for version with validation
-train_test_path <- get_train_test_data_path(path_onedrive, prompt_user = TRUE)
+# train test data to use -- datasets are in dated folders
+# Check if TRAIN_TEST_DATE env var is set (from run_pipeline), otherwise prompt user
+train_test_date_env <- Sys.getenv("TRAIN_TEST_DATE", unset = "")
+if (train_test_date_env != "") {
+  train_test_path <- get_train_test_data_path(path_onedrive, prompt_user = FALSE, date = train_test_date_env)
+} else {
+  train_test_path <- get_train_test_data_path(path_onedrive, prompt_user = TRUE)
+}
 
 # Store train/test date in environment variable for use by subsequent pipeline steps
 train_test_date <- basename(train_test_path)
