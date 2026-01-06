@@ -10,6 +10,7 @@
 #' @param expected Column name for expected (predicted) values
 #' @param expected_conf_lo Column name for lower confidence limit
 #' @param expected_conf_hi Column name for upper confidence limit
+#' @param symmetric_ci Logical, if TRUE use symmetric CI approach (default TRUE)
 #'
 #' @return Data frame with excess calculations and formatted output
 #'
@@ -17,21 +18,46 @@ calc_excess_hosp <- function(df,
                               observed = "observed",
                               expected = "expected",
                               expected_conf_lo = "expected_low",
-                              expected_conf_hi = "expected_up") {
+                              expected_conf_hi = "expected_up",
+                              symmetric_ci = TRUE) {
   
   result <- df |>
     dplyr::mutate(
       # Calculate excess
-      excess = !!sym(observed) - !!sym(expected),
-      excess_lo = !!sym(observed) - !!sym(expected_conf_hi),
-      excess_hi = !!sym(observed) - !!sym(expected_conf_lo),
-      
-      # Calculate percent excess
-      excess_pct = (excess / !!sym(expected)) * 100,
-      excess_pct_lo = (excess_lo / !!sym(expected)) * 100,
-      excess_pct_hi = (excess_hi / !!sym(expected)) * 100,
-      
-      # Format as strings with CIs
+      excess = !!sym(observed) - !!sym(expected)
+    )
+  
+  if (symmetric_ci) {
+    # Symmetric CI approach: compute SE and apply ±1.96*SE
+    result <- result |>
+      dplyr::mutate(
+        expected_se = (!!sym(expected_conf_hi) - !!sym(expected)) / 1.96,
+        excess_lo = excess - 1.96 * expected_se,
+        excess_hi = excess + 1.96 * expected_se,
+        
+        # Calculate percent excess
+        excess_pct = (excess / !!sym(expected)) * 100,
+        excess_pct_lo = (excess_lo / !!sym(expected)) * 100,
+        excess_pct_hi = (excess_hi / !!sym(expected)) * 100
+      ) |>
+      dplyr::select(-expected_se)
+  } else {
+    # Asymmetric CI approach (original logic)
+    result <- result |>
+      dplyr::mutate(
+        excess_lo = !!sym(observed) - !!sym(expected_conf_hi),
+        excess_hi = !!sym(observed) - !!sym(expected_conf_lo),
+        
+        # Calculate percent excess
+        excess_pct = (excess / !!sym(expected)) * 100,
+        excess_pct_lo = (excess_lo / !!sym(expected)) * 100,
+        excess_pct_hi = (excess_hi / !!sym(expected)) * 100
+      )
+  }
+  
+  # Format as strings with CIs (same for both approaches)
+  result <- result |>
+    dplyr::mutate(
       expected_CI = sprintf("%.1f (%.1f, %.1f)", 
                            !!sym(expected), 
                            !!sym(expected_conf_lo), 
@@ -50,6 +76,118 @@ calc_excess_hosp <- function(df,
     dplyr::select(period, observed, expected_CI, excess_CI, excess_pct_CI)
   
   return(result)
+}
+
+
+#' Calculate excess hospitalizations from MBB results
+#'
+#' This function processes MBB bootstrap results to calculate excess hospitalizations
+#' for daily and period aggregates. It properly handles rates vs counts by using
+#' mean() for rates and sum() for counts.
+#'
+#' @param mbb_result MBB result object containing pred_matrix and pred_summary
+#' @param outcome_type Character, either "rate" or "num" (default "num")
+#' @param symmetric_ci Logical, if TRUE use symmetric CI approach (default TRUE)
+#'
+#' @return List containing:
+#'   - daily_excess: Data frame with daily excess calculations
+#'   - period_excess: Data frame with period aggregate excess calculations
+#'   - period_label: Character string with date range
+#'
+calc_excess_from_mbb <- function(mbb_result,
+                                  outcome_type = "num",
+                                  symmetric_ci = TRUE) {
+  
+  # Validate outcome_type
+  if (!outcome_type %in% c("rate", "num")) {
+    stop("outcome_type must be either 'rate' or 'num'")
+  }
+  
+  # Extract components from MBB result
+  pred_summary <- mbb_result$pred_summary
+  pred_matrix <- mbb_result$pred_matrix
+  
+  # Check if we have valid data
+  if (is.null(pred_summary) || nrow(pred_summary) == 0) {
+    warning("No prediction summary found in MBB result")
+    return(NULL)
+  }
+  
+  # ============================================================
+  # 1. Daily excess calculations
+  # ============================================================
+  df_daily <- pred_summary %>%
+    dplyr::mutate(
+      period = as.character(ds),
+      observed = y_actual,
+      respiratory_pred = yhat
+    ) %>%
+    dplyr::rename(conf_lo = conf_lo, conf_hi = conf_hi)
+  
+  daily_excess <- calc_excess_hosp(
+    df_daily,
+    observed = "observed",
+    expected = "respiratory_pred",
+    expected_conf_lo = "conf_lo",
+    expected_conf_hi = "conf_hi",
+    symmetric_ci = symmetric_ci
+  )
+  
+  # ============================================================
+  # 2. Period aggregate excess calculations
+  # ============================================================
+  
+  # Aggregate bootstrap predictions based on outcome type
+  if (outcome_type == "rate") {
+    # For rates: use average (mean)
+    bootstrap_aggregates <- colMeans(pred_matrix, na.rm = TRUE)
+    
+    df_period <- pred_summary %>%
+      dplyr::summarise(
+        observed = mean(y_actual, na.rm = TRUE),
+        expected = mean(yhat, na.rm = TRUE),
+        expected_low = quantile(bootstrap_aggregates, probs = 0.025, na.rm = TRUE),
+        expected_up = quantile(bootstrap_aggregates, probs = 0.975, na.rm = TRUE),
+        period = paste0(
+          format(min(ds), "%b %d"), " - ",
+          format(max(ds), "%b %d, %Y")
+        )
+      )
+  } else {
+    # For counts: use sum (total)
+    bootstrap_aggregates <- colSums(pred_matrix, na.rm = TRUE)
+    
+    df_period <- pred_summary %>%
+      dplyr::summarise(
+        observed = sum(y_actual, na.rm = TRUE),
+        expected = sum(yhat, na.rm = TRUE),
+        expected_low = quantile(bootstrap_aggregates, probs = 0.025, na.rm = TRUE),
+        expected_up = quantile(bootstrap_aggregates, probs = 0.975, na.rm = TRUE),
+        period = paste0(
+          format(min(ds), "%b %d"), " - ",
+          format(max(ds), "%b %d, %Y")
+        )
+      )
+  }
+  
+  period_excess <- calc_excess_hosp(
+    df_period,
+    observed = "observed",
+    expected = "expected",
+    expected_conf_lo = "expected_low",
+    expected_conf_hi = "expected_up",
+    symmetric_ci = symmetric_ci
+  )
+  
+  # Extract period label
+  period_label <- df_period$period[1]
+  
+  # Return results
+  return(list(
+    daily_excess = daily_excess,
+    period_excess = period_excess,
+    period_label = period_label
+  ))
 }
 
 
@@ -358,10 +496,11 @@ combine_and_expand_metrics <- function(all_metrics_list, outcome_type) {
 #' @param combined_metrics Combined metrics data frame
 #' @param r2_threshold R2 threshold value (default = 0)
 #' @param metric Metric to use for selecting best model: "sMAPE" or "MASE" (default = "sMAPE")
+#' @param n Number of top models to select with lowest metric value (default = 1)
 #'
-#' @return Data frame with best model for each combination
+#' @return Data frame with best model(s) for each combination
 #'
-identify_best_models <- function(combined_metrics, r2_threshold = 0, metric = "sMAPE") {
+identify_best_models <- function(combined_metrics, r2_threshold = 0, metric = "sMAPE", n = 1) {
   # Validate metric parameter
   if (!metric %in% c("sMAPE", "MASE")) {
     stop("metric must be either 'sMAPE' or 'MASE'")
@@ -388,7 +527,7 @@ identify_best_models <- function(combined_metrics, r2_threshold = 0, metric = "s
         # Filter to valid models and select lowest metric
         .x %>%
           filter(is_valid_model) %>%
-          slice_min(.data[[metric_col]], n = 1, with_ties = TRUE)
+          slice_min(.data[[metric_col]], n = n, with_ties = TRUE)
       } else {
         # No valid models - keep first row but set metrics to NA
         .x %>%
@@ -407,13 +546,20 @@ identify_best_models <- function(combined_metrics, r2_threshold = 0, metric = "s
 #'
 #' @param best_models_df Data frame with best models (must have columns: source_dir, version, enc_type, exposure_category, cause)
 #' @param models_dir Base models directory path
-#' @param bested_dir Directory to save extracted files
+#' @param bested_dir Directory to save extracted files (used for both PDFs and configs if separate directories not specified)
+#' @param pdf_dir Optional directory to save PDFs (if NULL, uses bested_dir)
+#' @param config_dir Optional directory to save configs (if NULL, uses bested_dir)
 #'
 #' @return NULL (files are written to disk)
 #'
-extract_best_model_files <- function(best_models_df, models_dir, bested_dir) {
-  # Create bested directory if it doesn't exist
-  dir.create(bested_dir, recursive = TRUE, showWarnings = FALSE)
+extract_best_model_files <- function(best_models_df, models_dir, bested_dir, pdf_dir = NULL, config_dir = NULL) {
+  # Use separate directories if provided, otherwise use bested_dir for both
+  pdf_dest_dir <- if (!is.null(pdf_dir)) pdf_dir else bested_dir
+  config_dest_dir <- if (!is.null(config_dir)) config_dir else bested_dir
+  
+  # Create directories if they don't exist
+  dir.create(pdf_dest_dir, recursive = TRUE, showWarnings = FALSE)
+  dir.create(config_dest_dir, recursive = TRUE, showWarnings = FALSE)
   
   # Track success/failure counts
   pdf_success <- 0
@@ -451,7 +597,10 @@ extract_best_model_files <- function(best_models_df, models_dir, bested_dir) {
     combination_pattern <- paste0("^", enc_type, "_", exposure_category, "_", cause, "_.*")
     
     # Remove existing files for this combination before adding new ones
-    existing_files <- list.files(bested_dir, pattern = combination_pattern, full.names = TRUE)
+    # Check both directories if they're different
+    existing_pdf_files <- list.files(pdf_dest_dir, pattern = combination_pattern, full.names = TRUE)
+    existing_config_files <- list.files(config_dest_dir, pattern = combination_pattern, full.names = TRUE)
+    existing_files <- c(existing_pdf_files, existing_config_files)
     if (length(existing_files) > 0) {
       file.remove(existing_files)
       files_replaced <- files_replaced + length(existing_files)
@@ -459,7 +608,7 @@ extract_best_model_files <- function(best_models_df, models_dir, bested_dir) {
     
     # Copy PDF if it exists
     if (file.exists(pdf_source)) {
-      pdf_dest <- paste0(bested_dir, file_prefix, "_fit.pdf")
+      pdf_dest <- paste0(pdf_dest_dir, "/", file_prefix, "_fit.pdf")
       file.copy(pdf_source, pdf_dest, overwrite = TRUE)
       pdf_success <- pdf_success + 1
     } else {
@@ -484,7 +633,7 @@ extract_best_model_files <- function(best_models_df, models_dir, bested_dir) {
         config$models_to_run <- NULL
         
         # Write modified config
-        config_dest <- paste0(bested_dir, file_prefix, "_config.yaml")
+        config_dest <- paste0(config_dest_dir, "/", file_prefix, "_config.yaml")
         yaml::write_yaml(config, config_dest)
         config_success <- config_success + 1
         
