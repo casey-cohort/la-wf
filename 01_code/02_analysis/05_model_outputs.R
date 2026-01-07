@@ -53,7 +53,6 @@ tables_dir <- output_dirs$tables
 
 # Initialize results storage ----
 all_metrics_list <- list()
-all_excess_list <- list()
 
 # Process each model combination ----
 cat("=== Generating Outputs ===\n")
@@ -315,75 +314,6 @@ for (enc in names(mbb_results)) {
           print(traceback())
         })
         
-        # ============================================================
-        # 3. Calculate Excess Hospitalizations (Holdout period only)
-        # ============================================================
-        
-        if (!is.null(holdout_MBB) && nrow(holdout_obs) > 0) {
-          cat("  Calculating excess hospitalizations...\n")
-          
-          # Daily data for holdout period
-          df_daily_holdout <- holdout_MBB$pred_summary %>%
-            mutate(
-              period = as.character(ds),
-              observed = y_actual,
-              respiratory_pred = yhat
-            ) %>%
-            rename(conf_lo = conf_lo, conf_hi = conf_hi)
-          
-          # Total for entire holdout period
-          # Sum predictions for each bootstrap iteration to get distribution of totals
-          # This properly accounts for temporal correlation in the bootstrap samples
-          bootstrap_totals <- colSums(holdout_MBB$pred_matrix, na.rm = TRUE)
-          
-          df_period_all_holdout <- holdout_MBB$pred_summary %>%
-            summarise(
-              observed = sum(y_actual),
-              expected = sum(yhat),
-              expected_low = quantile(bootstrap_totals, probs = 0.025, na.rm = TRUE),
-              expected_up = quantile(bootstrap_totals, probs = 0.975, na.rm = TRUE),
-              period = paste0(
-                format(min(ds), "%b %d"), " - ",
-                format(max(ds), "%b %d, %Y")
-              )
-            )
-          
-          # Calculate excess hospitalizations
-          result_daily_holdout <- calc_excess_hosp(
-            df_daily_holdout,
-            observed = "observed",
-            expected = "respiratory_pred",
-            expected_conf_lo = "conf_lo",
-            expected_conf_hi = "conf_hi"
-          )
-          
-          result_period_all <- calc_excess_hosp(
-            df_period_all_holdout,
-            observed = "observed",
-            expected = "expected",
-            expected_conf_lo = "expected_low",
-            expected_conf_hi = "expected_up"
-          )
-          
-          # Combine results
-          result_combined <- bind_rows(
-            result_period_all,
-            result_daily_holdout
-          ) %>%
-            mutate(
-              enc_type = enc,
-              exposure_category = exposure,
-              cause = cause
-            )
-          
-          # Store for aggregation
-          all_excess_list[[combo_key]] <- result_combined
-          
-          # Save individual excess hospitalization table
-          excess_csv <- paste0(tables_dir, "excess_hosp_", enc, "_", exposure, "_", cause, ".csv")
-          write.csv(result_combined, excess_csv, row.names = FALSE)
-        }
-        
         cat("  Completed successfully\n\n")
         
       }, error = function(e) {
@@ -403,8 +333,7 @@ for (enc in names(mbb_results)) {
 # ============================================================
 
 cat("\n=== Saving Combined Outputs ===\n")
-cat("Number of metrics dataframes collected:", length(all_metrics_list), "\n")
-cat("Number of excess hospitalization dataframes collected:", length(all_excess_list), "\n\n")
+cat("Number of metrics dataframes collected:", length(all_metrics_list), "\n\n")
 
 # Save combined metrics
 if (length(all_metrics_list) > 0) {
@@ -417,52 +346,9 @@ if (length(all_metrics_list) > 0) {
   cat("WARNING: No metrics were collected. No metrics file will be saved.\n")
 }
 
-# Save combined excess hospitalizations
-if (length(all_excess_list) > 0) {
-  all_excess <- bind_rows(all_excess_list)
-  excess_file <- paste0(tables_dir, "excess_hospitalizations_all_", mod_ver_suffix, ".csv")
-  write.csv(all_excess, excess_file, row.names = FALSE)
-  cat("Combined excess hospitalizations saved to:", excess_file, "\n")
-  cat("  Rows:", nrow(all_excess), "\n")
-  
-  # Create HTML table for summary (total period only)
-  excess_summary <- all_excess %>%
-    group_by(enc_type, exposure_category, cause) %>%
-    slice(1) %>%  # First row is the total period
-    ungroup()
-  
-  gt_excess <- excess_summary %>%
-    select(enc_type, exposure_category, cause, period, observed, expected_CI, excess_CI, excess_pct_CI) %>%
-    gt() %>%
-    tab_header(
-      title = "Excess Hospitalizations Summary with MBB CIs",
-      subtitle = "Holdout Period (post Jan 7, 2025)"
-    ) %>%
-    tab_style(
-      style = cell_text(weight = "bold"),
-      locations = cells_column_labels()
-    ) %>%
-    cols_label(
-      enc_type = "Encounter Type",
-      exposure_category = "Exposure",
-      cause = "Outcome",
-      period = "Period",
-      observed = "Observed",
-      expected_CI = "Expected (95% CI)",
-      excess_CI = "Excess (95% CI)",
-      excess_pct_CI = "Excess % (95% CI)"
-    )
-  
-  excess_html <- paste0(tables_dir, "excess_hospitalizations_summary_", mod_ver_suffix, ".html")
-  gtsave(gt_excess, excess_html)
-  cat("Excess hospitalizations HTML table saved to:", excess_html, "\n")
-} else {
-  cat("WARNING: No excess hospitalization data was collected. No excess file will be saved.\n")
-  cat("  (This is normal if there are no holdout periods in the data)\n")
-}
-
-cat("\n=== Output Generation Complete! ===\n")
+cat("\n=== Model Performance Metrics Complete! ===\n")
 cat("\nAll outputs saved to:", latest_dir, "\n")
 cat("  - Figures:", figures_dir, "\n")
-cat("  - Tables:", tables_dir, "\n")
+cat("  - Tables (metrics):", tables_dir, "\n")
+cat("\nNote: Excess hospitalization calculations are generated separately in 07_gen_final_outputs.R\n")
 
