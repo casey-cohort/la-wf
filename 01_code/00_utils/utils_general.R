@@ -641,14 +641,15 @@ create_time_series_split <- function(df_train_test, config) {
 #' all_results <- load_nested_results(latest_dir)
 #'
 load_nested_results <- function(output_dir, pattern = "all_results_nested_.*\\.RData") {
-  # Find the nested results file
-  results_files <- list.files(output_dir, pattern = pattern, full.names = TRUE)
+  # Find the nested results file in results subdirectory
+  results_subdir <- paste0(output_dir, "/results/")
+  results_files <- list.files(results_subdir, pattern = pattern, full.names = TRUE)
   if (length(results_files) == 0) {
-    cat("ERROR: No nested results file found in:", output_dir, "\n")
+    cat("ERROR: No nested results file found in:", results_subdir, "\n")
     cat("Looking for pattern:", pattern, "\n")
     cat("Files in directory:\n")
-    print(list.files(output_dir))
-    stop("No nested results file found in ", output_dir)
+    print(list.files(results_subdir))
+    stop("No nested results file found in ", results_subdir)
   }
   results_file <- results_files[1]
   cat("Loading model results from:", results_file, "\n")
@@ -675,13 +676,14 @@ load_nested_results <- function(output_dir, pattern = "all_results_nested_.*\\.R
 #' mbb_results <- load_mbb_results(latest_dir)
 #'
 load_mbb_results <- function(output_dir, pattern = "mbb_results_nested_.*\\.rds") {
-  # Find the MBB results file
-  mbb_files <- list.files(output_dir, pattern = pattern, full.names = TRUE)
+  # Find the MBB results file in results subdirectory
+  results_subdir <- paste0(output_dir, "/results/")
+  mbb_files <- list.files(results_subdir, pattern = pattern, full.names = TRUE)
   if (length(mbb_files) == 0) {
-    cat("ERROR: No MBB results file found in:", output_dir, "\n")
+    cat("ERROR: No MBB results file found in:", results_subdir, "\n")
     cat("Looking for pattern:", pattern, "\n")
     cat("Files in directory:\n")
-    print(list.files(output_dir))
+    print(list.files(results_subdir))
     stop("No MBB results file found. Please run 04_model_mbb_cis.R first.")
   }
   mbb_file <- mbb_files[1]

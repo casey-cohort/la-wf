@@ -1,6 +1,6 @@
 .lintr
 01_data/*
-03_output/*
+01_code/archive/*
 01_code/03_testing/*
 04_plots/*
 paths.R

@@ -90,7 +90,7 @@ for (i in 1:nrow(best_models_manual)) {
   
   # Extract mod_ver_suffix from version (removes "model_run_" prefix)
   mod_ver_suffix <- extract_version_suffix(version)
-  mbb_file <- paste0(model_version_dir, "mbb_results_nested_", mod_ver_suffix, ".rds")
+  mbb_file <- paste0(model_version_dir, "results/mbb_results_nested_", mod_ver_suffix, ".rds")
   
   if (!file.exists(mbb_file)) {
     cat("  WARNING: MBB results file not found:", mbb_file, "\n")

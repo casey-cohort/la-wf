@@ -11,10 +11,14 @@ if (!exists("pipeline_start_time")) {
   rm(list=ls())
 }
 if (!requireNamespace('pacman', quietly = TRUE)) {install.packages('pacman')}
-pacman::p_load(tidyverse, readr, tidyr, purrr, lubridate, MMWRweek, here, arrow)
+pacman::p_load(tidyverse, readr, tidyr, purrr, lubridate, MMWRweek, here, arrow, yaml, readxl)
 
 # set paths
 source(paste0(getwd(), "/01_code/paths.R"))
+
+# load config
+config <- yaml::read_yaml(paste0(getwd(), "/01_code/02_analysis/model_config.yaml"))
+rates_denom <- config$rates_denom  
 
 # merge denoms with df_temp
 # 1. pull out year and month in df_temp
@@ -101,11 +105,11 @@ df_rates <- out_df %>%
   mutate(year = year(encounter_dt),
          month = month(encounter_dt)) %>%
   left_join(denoms, by = c("year", "month", "exposure_category")) %>%
-  mutate(rate_enc = (num_enc / N) * 100000, 
-         rate_enc_cardio = (num_enc_cardio / N) * 100000,
-         rate_enc_resp = (num_enc_resp / N) * 100000,
-         rate_enc_neuro = (num_enc_neuro / N) * 100000,
-         rate_enc_injury = (num_enc_injury / N) * 100000)
+  mutate(rate_enc = (num_enc / N) * rates_denom, 
+         rate_enc_cardio = (num_enc_cardio / N) * rates_denom,
+         rate_enc_resp = (num_enc_resp / N) * rates_denom,
+         rate_enc_neuro = (num_enc_neuro / N) * rates_denom,
+         rate_enc_injury = (num_enc_injury / N) * rates_denom)
 
 #-------------------------------
 # create training and testing dataset

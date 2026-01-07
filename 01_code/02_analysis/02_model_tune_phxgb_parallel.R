@@ -88,6 +88,13 @@ progressr::handlers(progressr::handler_progress(
   width = 60
 ))
 
+#------------------------------
+# Create subdirectories for organized output
+results_dir <- paste0(models_path, folder_name, "results/")
+performance_metrics_dir <- paste0(models_path, folder_name, "performance_metrics/")
+dir.create(results_dir, recursive = TRUE, showWarnings = FALSE)
+dir.create(performance_metrics_dir, recursive = TRUE, showWarnings = FALSE)
+
 for (batch in 1:n_batches) {
   cat("\n=== Processing batch", batch, "of", n_batches, "===\n")
   
@@ -121,9 +128,9 @@ for (batch in 1:n_batches) {
   
   all_combination_results <- c(all_combination_results, batch_results)
   
-  # save intermediate results
+  # save intermediate results in results/ subdirectory
   save(all_combination_results, 
-       file = paste0(models_path, folder_name, "intermediate_results_batch_", batch, "_", mod_ver_suffix, ".RData"))
+       file = paste0(results_dir, "intermediate_results_batch_", batch, "_", mod_ver_suffix, ".RData"))
 
   cat("Completed", length(all_combination_results), "of", nrow(all_combinations), "combinations\n")
   
@@ -309,17 +316,17 @@ if (!is.null(all_metrics) && nrow(all_metrics) > 0) {
 }
 
 #------------------------------
-# save final results
+# save final results in results/ subdirectory
 save(all_results, 
-     file = paste0(models_path, folder_name, "all_results_nested_", mod_ver_suffix, ".RData"))
+     file = paste0(results_dir, "all_results_nested_", mod_ver_suffix, ".RData"))
 
 save(all_combination_results, 
-     file = paste0(models_path, folder_name, "all_results_with_errors_flat_", mod_ver_suffix, ".RData"))
+     file = paste0(results_dir, "all_results_with_errors_flat_", mod_ver_suffix, ".RData"))
 
-# save performance metrics
+# save performance metrics in performance_metrics/ subdirectory
 if (!is.null(all_metrics) && nrow(all_metrics) > 0) {
   write.csv(all_metrics, 
-            paste0(models_path, folder_name, "performance_metrics_", mod_ver_suffix, ".csv"), 
+            paste0(performance_metrics_dir, "performance_metrics_", mod_ver_suffix, ".csv"), 
             row.names = FALSE)
   cat("Performance metrics saved successfully\n")
 } else {

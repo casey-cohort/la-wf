@@ -20,23 +20,40 @@
 #'
 #' @examples
 #' Example 1: Run specific models manually
-#' Option A: Using make_models helper (easier when encounter_type is the same)
-#' models_to_run <- make_models("ED", list(c("high_smoke", "rate_enc"), c("mid_smoke", "rate_enc_resp")))
-#' run_batch_bested(models_to_run, user = "lbw")
+#'   Option A: Using make_models helper (easier when encounter_type is the same)
+#'   models_to_run <- make_models("ED", 
+#'     list(c("high_smoke", "rate_enc"), 
+#'          c("mid_smoke", "rate_enc_resp")))
+#'   run_batch_bested(models_to_run, user = "lbw")
 #'
-# Example 2: Run all ED models with all exposure categories and causes
-#' models_to_run <- generate_model_combinations(encounter_type = "ED", exposure_category = c("high_smoke", "mid_smoke", "none"), cause = c("rate_enc", "rate_enc_resp", "rate_enc_cardio", "rate_enc_injury", "rate_enc_neuro"))
-#' run_batch_bested(models_to_run, user = "lbw")
+#'   Option B: Traditional list format
+#'   models_to_run <- list(
+#'     list(encounter_type = "ED", exposure_category = "high_smoke", cause = "rate_enc"),
+#'     list(encounter_type = "ED", exposure_category = "mid_smoke", cause = "rate_enc_resp")
+#'   )
+#'   run_batch_bested(models_to_run, user = "lbw")
 #'
-# Example 3: Run all models for a specific exposure category
-#' models_to_run <- generate_model_combinations(encounter_type = "ED", exposure_category = "high_smoke", cause = c("rate_enc", "rate_enc_resp", "rate_enc_cardio", "rate_enc_injury", "rate_enc_neuro"))
-#' run_batch_bested(models_to_run, user = "lbw")
+#' Example 2: Run all ED models with all exposure categories and causes
+#'   models_to_run <- generate_model_combinations(
+#'     encounter_type = "ED",
+#'     exposure_category = c("high_smoke", "mid_smoke", "none"),
+#'     cause = c("rate_enc", "rate_enc_resp", "rate_enc_cardio", "rate_enc_injury", "rate_enc_neuro")
+#'   )
+#'   run_batch_bested(models_to_run, user = "lbw")
 #'
-# Example 4: Run ALL bested models with diff number of sims
-#' models_to_run <- get_all_bested_models()  # Gets all models from bested folder (user-agnostic)
-#' run_batch_bested(models_to_run, user = "lbw", n_sim_mbb = 500, train_test_date = "2025-12-30")
-#' # user determines where outputs are saved
-#' # train_test_date avoids prompting for data date multiple times
+#' Example 3: Run all models for a specific exposure category
+#'   models_to_run <- generate_model_combinations(
+#'     encounter_type = "ED",
+#'     exposure_category = "high_smoke",
+#'     cause = c("rate_enc", "rate_enc_resp", "rate_enc_cardio", "rate_enc_injury", "rate_enc_neuro")
+#'   )
+#'   run_batch_bested(models_to_run, user = "lbw")
+#'
+#' Example 4: Run ALL bested models with diff number of sims
+#'   models_to_run <- get_all_bested_models()  # Gets all models from bested folder (user-agnostic)
+#'   run_batch_bested(models_to_run, user = "lbw", n_sim_mbb = 500, train_test_date = "2025-12-30")
+#'   # user determines where outputs are saved
+#'   # train_test_date avoids prompting for data date multiple times
 #'
 generate_model_combinations <- function(encounter_type, exposure_category, cause) {
   expand.grid(
@@ -65,7 +82,7 @@ generate_model_combinations <- function(encounter_type, exposure_category, cause
 #' # Option 1: Separate vectors
 #' models <- make_models("ED", c("high_smoke", "mid_smoke"), c("rate_enc", "rate_enc_resp"))
 #'
-#' # Option 2: List of pairs
+#' # Option 2: Using a List
 #' models <- make_models("ED", list(c("high_smoke", "rate_enc"), c("mid_smoke", "rate_enc_resp")))
 #'
 make_models <- function(encounter_type, exposure_category, cause = NULL) {
