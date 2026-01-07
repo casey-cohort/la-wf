@@ -47,9 +47,9 @@ mbb_results <- load_mbb_results(latest_dir)
 mod_ver_suffix <- extract_version_suffix(latest_dir)
 
 # Create output directories ----
-output_dirs <- create_output_subdirectories(latest_dir, c("figures", "tables"))
+output_dirs <- create_output_subdirectories(latest_dir, c("figures", "performance_metrics"))
 figures_dir <- output_dirs$figures
-tables_dir <- output_dirs$tables
+performance_metrics_dir <- output_dirs$performance_metrics
 
 # Initialize results storage ----
 all_metrics_list <- list()
@@ -338,7 +338,7 @@ cat("Number of metrics dataframes collected:", length(all_metrics_list), "\n\n")
 # Save combined metrics
 if (length(all_metrics_list) > 0) {
   all_metrics <- bind_rows(all_metrics_list)
-  metrics_file <- paste0(tables_dir, "performance_metrics_with_mbb_", mod_ver_suffix, ".csv")
+  metrics_file <- paste0(performance_metrics_dir, "performance_metrics_with_mbb_", mod_ver_suffix, ".csv")
   write.csv(all_metrics, metrics_file, row.names = FALSE)
   cat("Combined metrics saved to:", metrics_file, "\n")
   cat("  Rows:", nrow(all_metrics), "\n")
@@ -349,6 +349,6 @@ if (length(all_metrics_list) > 0) {
 cat("\n=== Model Performance Metrics Complete! ===\n")
 cat("\nAll outputs saved to:", latest_dir, "\n")
 cat("  - Figures:", figures_dir, "\n")
-cat("  - Tables (metrics):", tables_dir, "\n")
+cat("  - Performance metrics:", performance_metrics_dir, "\n")
 cat("\nNote: Excess hospitalization calculations are generated separately in 07_gen_final_outputs.R\n")
 

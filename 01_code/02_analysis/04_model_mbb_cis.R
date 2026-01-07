@@ -258,10 +258,15 @@ cat("\n=== Saving MBB results ===\n")
 
 # Extract timestamp from latest_dir
 mod_ver_suffix <- extract_version_suffix(latest_dir)
-output_file <- paste0(latest_dir, "/mbb_results_nested_", mod_ver_suffix, ".rds")
+
+# Create results subdirectory if it doesn't exist
+results_dir <- paste0(latest_dir, "/results/")
+dir.create(results_dir, recursive = TRUE, showWarnings = FALSE)
+output_file <- paste0(results_dir, "mbb_results_nested_", mod_ver_suffix, ".rds")
 
 cat("Preparing to save MBB results:\n")
 cat("  Output directory:", latest_dir, "\n")
+cat("  Results subdirectory:", results_dir, "\n")
 cat("  Output file:", output_file, "\n")
 cat("  Number of encounter types:", length(mbb_results), "\n")
 

@@ -397,16 +397,16 @@ extract_metrics_from_dir <- function(model_dir_info, outcome_type) {
   source_dir <- model_dir_info$source_dir
   version <- basename(model_dir)
   
-  # Find performance metrics file in tables subdirectory
-  tables_dir <- paste0(model_dir, "/tables/")
+  # Find performance metrics file in performance_metrics subdirectory
+  performance_metrics_dir <- paste0(model_dir, "/performance_metrics/")
   
-  if (!dir.exists(tables_dir)) {
+  if (!dir.exists(performance_metrics_dir)) {
     return(NULL)
   }
   
   # Find performance_metrics_with_mbb_*.csv file
   metrics_files <- list.files(
-    tables_dir, 
+    performance_metrics_dir, 
     pattern = "^performance_metrics_with_mbb_.*\\.csv$", 
     full.names = TRUE
   )
