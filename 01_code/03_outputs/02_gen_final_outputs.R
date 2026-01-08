@@ -17,6 +17,8 @@ source(paste0(getwd(), "/01_code/00_utils/utils_best_tuned.R"))
 config_file <- paste0(getwd(), "/01_code/02_analysis/model_config.yaml")
 config <- yaml::read_yaml(config_file)
 outcome_type <- config$outcome_type
+ci_method <- config$ci_params$method
+ci_level <- config$ci_params$level
 
 # Define directory paths
 models_dir <- here(path_onedrive, "02_output/models/")
@@ -138,7 +140,8 @@ for (i in 1:nrow(best_models_manual)) {
     excess_results <- calc_excess_from_mbb(
       mbb_result = holdout_MBB,
       outcome_type = outcome_type,
-      symmetric_ci = TRUE
+      ci_method = ci_method,
+      ci_level = ci_level
     )
     
     if (is.null(excess_results)) {

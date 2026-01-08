@@ -33,7 +33,10 @@ generate_MBB_CIs_tidymodels <- function(wflw_fit,
                                         L_block = 14,
                                         seed = 123,
                                         rec_obj_unfitted = NULL,
-                                        model_spec = NULL) {
+                                        model_spec = NULL,
+                                        ci_method = "quantile",
+                                        ci_level = 0.95,
+                                        ensure_nonnegative = FALSE) {
   
   # NOTE: We do NOT call set.seed() here because:
   # 1. Parallel workers manage their own RNG state via furrr_options(seed = TRUE)
@@ -344,20 +347,22 @@ generate_MBB_CIs_tidymodels <- function(wflw_fit,
     stop("Original model predictions are invalid. Check fitted workflow.")
   }
   
-  # Compute summary with confidence intervals
+  # Compute summary with confidence intervals using configured method
+  ci_results <- calculate_bootstrap_ci(
+    bootstrap_matrix = pred_matrix,
+    point_estimate = original_pred,
+    method = ci_method,
+    ci_level = ci_level,
+    ensure_nonnegative = ensure_nonnegative
+  )
+  
   pred_summary <- tibble::tibble(
     ds = as.Date(target_df$date),
     y_actual = target_df[[outcome_col]],
     yhat = original_pred,
-    # CIs using quantile approach; will lead to asymmetric CIs
-    # conf_lo = apply(pred_matrix, 1, quantile, probs = 0.025, na.rm = TRUE),
-    # conf_hi = apply(pred_matrix, 1, quantile, probs = 0.975, na.rm = TRUE)
-    # CIs using SD of bootstrap distribution; will lead to symmetric CIs
-    bootstrap_sd = apply(pred_matrix, 1, sd, na.rm = TRUE),
-    conf_lo = original_pred - 1.96 * bootstrap_sd,
-    conf_hi = original_pred + 1.96 * bootstrap_sd
-  ) |>
-  dplyr::select(-bootstrap_sd)  # Remove intermediate column
+    conf_lo = ci_results$conf_lo,
+    conf_hi = ci_results$conf_hi
+  )
   
   cat("  Point estimates from original model: ", sum(!is.na(pred_summary$yhat)), "out of", nrow(pred_summary), "\n")
   
@@ -367,6 +372,47 @@ generate_MBB_CIs_tidymodels <- function(wflw_fit,
     pred_summary = pred_summary,
     block_length = L_block
   ))
+}
+
+
+#' Calculate bootstrap confidence intervals with configurable method
+#'
+#' @param bootstrap_matrix Matrix of bootstrap samples (n_observations x n_sim)
+#' @param point_estimate Vector of point estimates (length n_observations)
+#' @param method CI calculation method: "quantile" or "symmetric_sd"
+#' @param ci_level Confidence level (default 0.95)
+#' @param ensure_nonnegative Truncate lower bound at 0 for count data
+#'
+#' @return List with conf_lo and conf_hi vectors
+#'
+calculate_bootstrap_ci <- function(bootstrap_matrix, 
+                                   point_estimate,
+                                   method = c("quantile", "symmetric_sd"),
+                                   ci_level = 0.95,
+                                   ensure_nonnegative = FALSE) {
+  method <- match.arg(method)
+  alpha <- 1 - ci_level
+  
+  if (method == "quantile") {
+    # Quantile-based (non-parametric, asymmetric)
+    ci_lo <- apply(bootstrap_matrix, 1, quantile, 
+                   probs = alpha/2, na.rm = TRUE)
+    ci_hi <- apply(bootstrap_matrix, 1, quantile, 
+                   probs = 1 - alpha/2, na.rm = TRUE)
+  } else if (method == "symmetric_sd") {
+    # SD-based (parametric, symmetric)
+    z_score <- qnorm(1 - alpha/2)
+    bootstrap_sd <- apply(bootstrap_matrix, 1, sd, na.rm = TRUE)
+    ci_lo <- point_estimate - z_score * bootstrap_sd
+    ci_hi <- point_estimate + z_score * bootstrap_sd
+  }
+  
+  # Optional: ensure non-negative CIs for count data
+  if (ensure_nonnegative) {
+    ci_lo <- pmax(ci_lo, 0)
+  }
+  
+  return(list(conf_lo = ci_lo, conf_hi = ci_hi))
 }
 
 

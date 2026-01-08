@@ -25,9 +25,17 @@ n_sim <- config$n_sim_mbb
 L_block <- config$block_length_mbb  # Block length (days)
 seed <- config$seed
 
+# Set CI parameters
+ci_method <- config$ci_params$method
+ci_level <- config$ci_params$level
+ensure_nonnegative <- config$ci_params$ensure_nonnegative
+
 cat("MBB Parameters:\n")
 cat("  Number of simulations:", n_sim, "\n")
-cat("  Block length:", L_block, "days\n\n")
+cat("  Block length:", L_block, "days\n")
+cat("  CI method:", ci_method, "\n")
+cat("  CI level:", ci_level, "\n")
+cat("  Ensure non-negative CIs:", ensure_nonnegative, "\n\n")
 
 #------------------------------
 # Set up parallel processing for MBB
@@ -191,7 +199,10 @@ for (enc in names(all_results)) {
           L_block = L_block,
           seed = seed,
           rec_obj_unfitted = rec_obj_unfitted,
-          model_spec = model_spec_mbb
+          model_spec = model_spec_mbb,
+          ci_method = ci_method,
+          ci_level = ci_level,
+          ensure_nonnegative = ensure_nonnegative
         )
         toc()
         
@@ -208,7 +219,10 @@ for (enc in names(all_results)) {
             L_block = L_block,
             seed = seed,
             rec_obj_unfitted = rec_obj_unfitted,
-            model_spec = model_spec_mbb
+            model_spec = model_spec_mbb,
+            ci_method = ci_method,
+            ci_level = ci_level,
+            ensure_nonnegative = ensure_nonnegative
           )
           toc()
         } else {

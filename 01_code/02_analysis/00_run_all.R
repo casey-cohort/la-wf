@@ -212,3 +212,6 @@ run_pipeline <- function(config_path = NULL, bested_model = NULL, user = NULL, n
   cat("Results saved to:", latest_dir, "\n")
   cat("Analysis complete!\n")
 }
+run_pipeline()
+
+beepr::beep()

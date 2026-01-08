@@ -14,6 +14,10 @@
 #'
 #' @return Data frame with excess calculations and formatted output
 #'
+#' @note DEPRECATED: This function uses error propagation which assumes 
+#'   symmetric, normal distributions. Use calc_excess_with_bootstrap() 
+#'   for statistically valid excess calculations.
+#'
 calc_excess_hosp <- function(df,
                               observed = "observed",
                               expected = "expected",
@@ -79,6 +83,65 @@ calc_excess_hosp <- function(df,
 }
 
 
+#' Calculate excess with bootstrap-based CIs (proper method)
+#'
+#' @param pred_matrix Bootstrap prediction matrix (n_days x n_sim)
+#' @param observed Vector of observed values
+#' @param point_estimate Vector of point predictions
+#' @param ci_method CI calculation method ("quantile" or "symmetric_sd")
+#' @param ci_level Confidence level
+#'
+#' @return Tibble with excess, excess_lo, excess_hi, excess_pct, excess_pct_lo, excess_pct_hi
+#'
+calc_excess_with_bootstrap <- function(pred_matrix, 
+                                       observed,
+                                       point_estimate,
+                                       ci_method = "quantile",
+                                       ci_level = 0.95) {
+  # Source the calculate_bootstrap_ci function from utils_mbb.R
+  if (!exists("calculate_bootstrap_ci")) {
+    source(paste0(getwd(), "/01_code/00_utils/utils_mbb.R"))
+  }
+  
+  # Calculate excess for each bootstrap sample
+  excess_matrix <- sweep(pred_matrix, 1, observed, FUN = function(pred, obs) obs - pred)
+  
+  # Point estimate
+  excess_point <- observed - point_estimate
+  
+  # CIs using unified method
+  ci_result <- calculate_bootstrap_ci(
+    bootstrap_matrix = excess_matrix,
+    point_estimate = excess_point,
+    method = ci_method,
+    ci_level = ci_level,
+    ensure_nonnegative = FALSE  # Excess can be negative
+  )
+  
+  # Calculate percent excess
+  excess_pct <- (excess_point / point_estimate) * 100
+  
+  # For percent excess CIs, calculate from bootstrap distribution
+  pct_excess_matrix <- (excess_matrix / point_estimate) * 100
+  pct_ci_result <- calculate_bootstrap_ci(
+    bootstrap_matrix = pct_excess_matrix,
+    point_estimate = excess_pct,
+    method = ci_method,
+    ci_level = ci_level,
+    ensure_nonnegative = FALSE
+  )
+  
+  return(tibble(
+    excess = excess_point,
+    excess_lo = ci_result$conf_lo,
+    excess_hi = ci_result$conf_hi,
+    excess_pct = excess_pct,
+    excess_pct_lo = pct_ci_result$conf_lo,
+    excess_pct_hi = pct_ci_result$conf_hi
+  ))
+}
+
+
 #' Calculate excess hospitalizations from MBB results
 #'
 #' This function processes MBB bootstrap results to calculate excess hospitalizations
@@ -87,7 +150,8 @@ calc_excess_hosp <- function(df,
 #'
 #' @param mbb_result MBB result object containing pred_matrix and pred_summary
 #' @param outcome_type Character, either "rate" or "num" (default "num")
-#' @param symmetric_ci Logical, if TRUE use symmetric CI approach (default TRUE)
+#' @param ci_method CI calculation method: "quantile" or "symmetric_sd" (default "quantile")
+#' @param ci_level Confidence level (default 0.95)
 #'
 #' @return List containing:
 #'   - daily_excess: Data frame with daily excess calculations
@@ -96,7 +160,8 @@ calc_excess_hosp <- function(df,
 #'
 calc_excess_from_mbb <- function(mbb_result,
                                   outcome_type = "num",
-                                  symmetric_ci = TRUE) {
+                                  ci_method = "quantile",
+                                  ci_level = 0.95) {
   
   # Validate outcome_type
   if (!outcome_type %in% c("rate", "num")) {
@@ -114,24 +179,32 @@ calc_excess_from_mbb <- function(mbb_result,
   }
   
   # ============================================================
-  # 1. Daily excess calculations
+  # 1. Daily excess calculations (proper bootstrap method)
   # ============================================================
-  df_daily <- pred_summary %>%
+  daily_excess_calcs <- calc_excess_with_bootstrap(
+    pred_matrix = pred_matrix,
+    observed = pred_summary$y_actual,
+    point_estimate = pred_summary$yhat,
+    ci_method = ci_method,
+    ci_level = ci_level
+  )
+  
+  daily_excess <- pred_summary %>%
+    dplyr::select(ds) %>%
+    dplyr::bind_cols(daily_excess_calcs) %>%
     dplyr::mutate(
       period = as.character(ds),
-      observed = y_actual,
-      respiratory_pred = yhat
+      observed = pred_summary$y_actual,
+      expected = pred_summary$yhat,
+      expected_low = pred_summary$conf_lo,
+      expected_up = pred_summary$conf_hi
     ) %>%
-    dplyr::rename(conf_lo = conf_lo, conf_hi = conf_hi)
-  
-  daily_excess <- calc_excess_hosp(
-    df_daily,
-    observed = "observed",
-    expected = "respiratory_pred",
-    expected_conf_lo = "conf_lo",
-    expected_conf_hi = "conf_hi",
-    symmetric_ci = symmetric_ci
-  )
+    dplyr::mutate(
+      expected_CI = sprintf("%.1f (%.1f, %.1f)", expected, expected_low, expected_up),
+      excess_CI = sprintf("%.1f (%.1f, %.1f)", excess, excess_lo, excess_hi),
+      excess_pct_CI = sprintf("%.1f%% (%.1f%%, %.1f%%)", excess_pct, excess_pct_lo, excess_pct_hi)
+    ) %>%
+    dplyr::select(period, observed, everything(), -ds)
   
   # ============================================================
   # 2. Period aggregate excess calculations
@@ -139,48 +212,70 @@ calc_excess_from_mbb <- function(mbb_result,
   
   # Aggregate bootstrap predictions based on outcome type
   if (outcome_type == "rate") {
-    # For rates: use average (mean)
     bootstrap_aggregates <- colMeans(pred_matrix, na.rm = TRUE)
-    
-    df_period <- pred_summary %>%
-      dplyr::summarise(
-        observed = mean(y_actual, na.rm = TRUE),
-        expected = mean(yhat, na.rm = TRUE),
-        expected_low = quantile(bootstrap_aggregates, probs = 0.025, na.rm = TRUE),
-        expected_up = quantile(bootstrap_aggregates, probs = 0.975, na.rm = TRUE),
-        period = paste0(
-          format(min(ds), "%b %d"), " - ",
-          format(max(ds), "%b %d, %Y")
-        )
-      )
+    observed_agg <- mean(pred_summary$y_actual, na.rm = TRUE)
+    expected_agg <- mean(pred_summary$yhat, na.rm = TRUE)
   } else {
-    # For counts: use sum (total)
     bootstrap_aggregates <- colSums(pred_matrix, na.rm = TRUE)
-    
-    df_period <- pred_summary %>%
-      dplyr::summarise(
-        observed = sum(y_actual, na.rm = TRUE),
-        expected = sum(yhat, na.rm = TRUE),
-        expected_low = quantile(bootstrap_aggregates, probs = 0.025, na.rm = TRUE),
-        expected_up = quantile(bootstrap_aggregates, probs = 0.975, na.rm = TRUE),
-        period = paste0(
-          format(min(ds), "%b %d"), " - ",
-          format(max(ds), "%b %d, %Y")
-        )
-      )
+    observed_agg <- sum(pred_summary$y_actual, na.rm = TRUE)
+    expected_agg <- sum(pred_summary$yhat, na.rm = TRUE)
   }
   
-  period_excess <- calc_excess_hosp(
-    df_period,
-    observed = "observed",
-    expected = "expected",
-    expected_conf_lo = "expected_low",
-    expected_conf_hi = "expected_up",
-    symmetric_ci = symmetric_ci
+  # CIs for expected (aggregated predictions)
+  expected_ci <- calculate_bootstrap_ci(
+    bootstrap_matrix = matrix(bootstrap_aggregates, nrow = 1),
+    point_estimate = expected_agg,
+    method = ci_method,
+    ci_level = ci_level,
+    ensure_nonnegative = TRUE
   )
   
+  # Calculate excess from aggregated bootstrap distribution
+  excess_aggregates <- observed_agg - bootstrap_aggregates
+  excess_agg <- observed_agg - expected_agg
+  
+  excess_ci <- calculate_bootstrap_ci(
+    bootstrap_matrix = matrix(excess_aggregates, nrow = 1),
+    point_estimate = excess_agg,
+    method = ci_method,
+    ci_level = ci_level,
+    ensure_nonnegative = FALSE
+  )
+  
+  # Percent excess
+  pct_excess_aggregates <- (excess_aggregates / expected_agg) * 100
+  pct_excess_agg <- (excess_agg / expected_agg) * 100
+  
+  pct_excess_ci <- calculate_bootstrap_ci(
+    bootstrap_matrix = matrix(pct_excess_aggregates, nrow = 1),
+    point_estimate = pct_excess_agg,
+    method = ci_method,
+    ci_level = ci_level,
+    ensure_nonnegative = FALSE
+  )
+  
+  period_excess <- tibble(
+    period = paste0(format(min(pred_summary$ds), "%b %d"), " - ",
+                   format(max(pred_summary$ds), "%b %d, %Y")),
+    observed = observed_agg,
+    expected = expected_agg,
+    expected_low = expected_ci$conf_lo,
+    expected_up = expected_ci$conf_hi,
+    excess = excess_agg,
+    excess_lo = excess_ci$conf_lo,
+    excess_hi = excess_ci$conf_hi,
+    excess_pct = pct_excess_agg,
+    excess_pct_lo = pct_excess_ci$conf_lo,
+    excess_pct_hi = pct_excess_ci$conf_hi
+  ) %>%
+    dplyr::mutate(
+      expected_CI = sprintf("%.1f (%.1f, %.1f)", expected, expected_low, expected_up),
+      excess_CI = sprintf("%.1f (%.1f, %.1f)", excess, excess_lo, excess_hi),
+      excess_pct_CI = sprintf("%.1f%% (%.1f%%, %.1f%%)", excess_pct, excess_pct_lo, excess_pct_hi)
+    )
+  
   # Extract period label
-  period_label <- df_period$period[1]
+  period_label <- period_excess$period[1]
   
   # Return results
   return(list(
