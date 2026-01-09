@@ -12,16 +12,16 @@ outcome_type: 'rate'
 # IMPORTANT: Use multi-line format for models_to_run_flat (as shown below).
 
 # OPTION 1: Uncomment to use cartesian product
-models_to_run:
-  encounter_type: ["ED"]
-  exposure_category: ["mid_smoke"]
-  cause: ["enc_cardio", "enc_injury"]
+# models_to_run:
+#   encounter_type: ["ED"]
+#   exposure_category: ["mid_smoke"]
+#   cause: ["enc_cardio", "enc_injury"]
 
 # OPTION 2: Currently active (comment out to use models_to_run instead)
-# models_to_run_flat:
-#   - encounter_type: "ED"
-#     exposure_category: "high_smoke"
-#     cause: "enc"
+models_to_run_flat:
+  - encounter_type: "ED"
+    exposure_category: "none"
+    cause: "enc_cardio"
 
 grid_params:
   # XGBoost parameters - more conservative to reduce overfitting
@@ -41,7 +41,7 @@ grid_params:
     range: [-5, 1]
     tune: true
   stop_iter:
-    range: [10, 50]
+    range: [10, 20]
     tune: true
   # New XGBoost parameters for regularization
   trees:
@@ -85,12 +85,17 @@ mase_seasonality: 7
 # Denominator for calculating rates (default: 100000)
 rates_denom: 100000
 
+# Confidence Interval Configuration
+ci_params:
+  method: "symmetric_sd"  # Options: "quantile", "symmetric_sd"
+  level: 0.95         # Confidence level (0-1)
+  ensure_nonnegative: false  # For count outcomes, truncate at 0
+
 # Number of CPU cores to leave free (used by both tuning and MBB scripts)
 cores_to_leave_out: 2
 
 # model description
 model_description: "Balanced hyperparameters"
-
 
 # For later, we want to be able to have different sets of params run
 # for specific models. Here's an idea of how to do that.
