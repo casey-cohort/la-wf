@@ -152,6 +152,7 @@ calc_excess_with_bootstrap <- function(pred_matrix,
 #' @param outcome_type Character, either "rate" or "num" (default "num")
 #' @param ci_method CI calculation method: "quantile" or "symmetric_sd" (default "quantile")
 #' @param ci_level Confidence level (default 0.95)
+#' @param num_days_agg Number of days from start of holdout period to include (default NULL = all days)
 #'
 #' @return List containing:
 #'   - daily_excess: Data frame with daily excess calculations
@@ -161,7 +162,8 @@ calc_excess_with_bootstrap <- function(pred_matrix,
 calc_excess_from_mbb <- function(mbb_result,
                                   outcome_type = "num",
                                   ci_method = "quantile",
-                                  ci_level = 0.95) {
+                                  ci_level = 0.95,
+                                  num_days_agg = NULL) {
   
   # Validate outcome_type
   if (!outcome_type %in% c("rate", "num")) {
@@ -176,6 +178,13 @@ calc_excess_from_mbb <- function(mbb_result,
   if (is.null(pred_summary) || nrow(pred_summary) == 0) {
     warning("No prediction summary found in MBB result")
     return(NULL)
+  }
+  
+  # Filter to first num_days_agg days if specified
+  if (!is.null(num_days_agg) && num_days_agg > 0) {
+    # Sort by date and take first num_days_agg rows
+    pred_summary <- pred_summary %>% dplyr::arrange(ds) %>% dplyr::slice_head(n = num_days_agg)
+    pred_matrix <- pred_matrix[1:min(num_days_agg, nrow(pred_matrix)), , drop = FALSE]
   }
   
   # ============================================================
@@ -644,10 +653,11 @@ identify_best_models <- function(combined_metrics, r2_threshold = 0, metric = "s
 #' @param bested_dir Directory to save extracted files (used for both PDFs and configs if separate directories not specified)
 #' @param pdf_dir Optional directory to save PDFs (if NULL, uses bested_dir)
 #' @param config_dir Optional directory to save configs (if NULL, uses bested_dir)
+#' @param multiple_versions Logical. If TRUE, allows multiple versions of the same combination to coexist. If FALSE (default), replaces existing files for the same combination.
 #'
 #' @return NULL (files are written to disk)
 #'
-extract_best_model_files <- function(best_models_df, models_dir, bested_dir, pdf_dir = NULL, config_dir = NULL) {
+extract_best_model_files <- function(best_models_df, models_dir, bested_dir, pdf_dir = NULL, config_dir = NULL, multiple_versions = FALSE) {
   # Use separate directories if provided, otherwise use bested_dir for both
   pdf_dest_dir <- if (!is.null(pdf_dir)) pdf_dir else bested_dir
   config_dest_dir <- if (!is.null(config_dir)) config_dir else bested_dir
@@ -691,14 +701,16 @@ extract_best_model_files <- function(best_models_df, models_dir, bested_dir, pdf
     # This allows us to replace old versions with new best models
     combination_pattern <- paste0("^", enc_type, "_", exposure_category, "_", cause, "_.*")
     
-    # Remove existing files for this combination before adding new ones
+    # Remove existing files for this combination before adding new ones (only if multiple_versions = FALSE)
     # Check both directories if they're different
-    existing_pdf_files <- list.files(pdf_dest_dir, pattern = combination_pattern, full.names = TRUE)
-    existing_config_files <- list.files(config_dest_dir, pattern = combination_pattern, full.names = TRUE)
-    existing_files <- c(existing_pdf_files, existing_config_files)
-    if (length(existing_files) > 0) {
-      file.remove(existing_files)
-      files_replaced <- files_replaced + length(existing_files)
+    if (!multiple_versions) {
+      existing_pdf_files <- list.files(pdf_dest_dir, pattern = combination_pattern, full.names = TRUE)
+      existing_config_files <- list.files(config_dest_dir, pattern = combination_pattern, full.names = TRUE)
+      existing_files <- c(existing_pdf_files, existing_config_files)
+      if (length(existing_files) > 0) {
+        file.remove(existing_files)
+        files_replaced <- files_replaced + length(existing_files)
+      }
     }
     
     # Copy PDF if it exists

@@ -49,6 +49,25 @@ generate_MBB_CIs_tidymodels <- function(wflw_fit,
   }
   library(boot)
   
+  # CRITICAL: Ensure data frames are ungrouped before using nrow()
+  # Grouped tibbles return number of groups, not rows, which causes dimension mismatches
+  if (inherits(train_df, "grouped_df")) {
+    train_df <- dplyr::ungroup(train_df)
+  }
+  if (inherits(target_df, "grouped_df")) {
+    target_df <- dplyr::ungroup(target_df)
+  }
+  
+  # Validate dimensions
+  n_train <- nrow(train_df)
+  n_target <- nrow(target_df)
+  if (n_train == 0) {
+    stop("train_df has 0 rows after ungrouping. Check data loading.")
+  }
+  if (n_target == 0) {
+    stop("target_df has 0 rows after ungrouping. Check data loading.")
+  }
+  
   # Get fitted values on training data
   fitted_values <- suppressWarnings({
     suppressMessages({
@@ -60,7 +79,7 @@ generate_MBB_CIs_tidymodels <- function(wflw_fit,
   residuals_vec <- train_df[[outcome_col]] - fitted_values
   
   # Initialize prediction matrix
-  pred_matrix <- matrix(NA, nrow = nrow(target_df), ncol = n_sim)
+  pred_matrix <- matrix(NA, nrow = n_target, ncol = n_sim)
   
   # Helper function for tsboot
   boot_resid_fn <- function(resid, i) {

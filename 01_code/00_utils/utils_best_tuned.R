@@ -102,95 +102,6 @@ make_models <- function(encounter_type, exposure_category, cause = NULL) {
 }
 
 #-------------------------------
-# Model Discovery Functions
-#-------------------------------
-
-#' Get all models from bested folder
-#'
-#' Scans the bested folder for config files and extracts unique model combinations.
-#' User-agnostic - finds models regardless of which user created them.
-#'
-#' @param path_onedrive Path to OneDrive directory (must be set in calling environment)
-#'
-#' @return List of lists, where each inner list contains encounter_type, exposure_category, and cause
-#'
-#' @examples
-#' models <- get_all_bested_models()
-#' run_batch_bested(models, user = "lbw")
-#'
-get_all_bested_models <- function(path_onedrive = NULL) {
-  # Get path_onedrive from environment if not provided
-  if (is.null(path_onedrive)) {
-    if (!exists("path_onedrive", envir = .GlobalEnv)) {
-      stop("path_onedrive must be provided or set in global environment")
-    }
-    path_onedrive <- get("path_onedrive", envir = .GlobalEnv)
-  }
-  
-  models_dir <- paste0(path_onedrive, "02_output/models/")
-  bested_dir <- paste0(models_dir, "bested/")
-  
-  if (!dir.exists(bested_dir)) {
-    stop("Bested directory does not exist: ", bested_dir)
-  }
-  
-  # Get all config files
-  config_files <- list.files(bested_dir, pattern = "_config\\.yaml$", full.names = FALSE)
-  
-  if (length(config_files) == 0) {
-    stop("No config files found in bested directory")
-  }
-  
-  # Extract model combinations from filenames
-  # Pattern: ED_high_smoke_rate_enc_akd_model_run_2026-01-02.v006_x20_sim100_config.yaml
-  models <- list()
-  for (config_file in config_files) {
-    # Remove _config.yaml suffix
-    base_name <- sub("_config\\.yaml$", "", config_file)
-    # Split by underscores
-    parts <- strsplit(base_name, "_")[[1]]
-    
-    # Find where user name appears (akd or lbw)
-    user_idx <- which(parts %in% c("akd", "lbw"))
-    if (length(user_idx) == 0) next
-    
-    # Everything before user_idx is: enc_type, exposure_category, cause
-    if (user_idx[1] >= 4) {
-      encounter_type <- parts[1]
-      exposure_category <- parts[2]
-      # Cause might be multiple parts (e.g., rate_enc_cardio)
-      cause <- paste(parts[3:(user_idx[1]-1)], collapse = "_")
-      
-      models[[length(models) + 1]] <- list(
-        encounter_type = encounter_type,
-        exposure_category = exposure_category,
-        cause = cause
-      )
-    }
-  }
-  
-  # Remove duplicates
-  models_df <- do.call(rbind, lapply(models, function(x) {
-    data.frame(encounter_type = x$encounter_type,
-               exposure_category = x$exposure_category,
-               cause = x$cause,
-               stringsAsFactors = FALSE)
-  }))
-  models_df <- unique(models_df)
-  
-  # Convert back to list of lists
-  models_list <- lapply(1:nrow(models_df), function(i) {
-    list(
-      encounter_type = models_df$encounter_type[i],
-      exposure_category = models_df$exposure_category[i],
-      cause = models_df$cause[i]
-    )
-  })
-  
-  return(models_list)
-}
-
-#-------------------------------
 # Batch Execution Functions
 #-------------------------------
 
@@ -207,6 +118,14 @@ get_all_bested_models <- function(path_onedrive = NULL) {
 #' @param n_sim_mbb Optional number of MBB simulations to override config default
 #' @param train_test_date Optional date string (YYYY-MM-DD) to avoid prompting multiple times
 #' @param path_onedrive Path to OneDrive directory (must be set in calling environment)
+#' @param bested_dir Directory name within models directory to read configs from.
+#'                   Default is "bested_final". Should not include trailing slash.
+#' @param ci_method Optional CI method override. Options: "quantile" or "symmetric_sd".
+#'                  If NULL, uses value from config file.
+#' @param ensure_nonnegative Optional override for ensure_nonnegative setting.
+#'                           If NULL, uses value from config file.
+#' @param model_path Optional path to models directory. If NULL, computed from user parameter.
+#'                   This overrides the config$user setting for output location.
 #'
 #' @return Invisibly returns a list with:
 #'   - valid_models: List of models that were successfully run
@@ -221,11 +140,16 @@ get_all_bested_models <- function(path_onedrive = NULL) {
 #' )
 #' run_batch_bested(models_to_run, user = "lbw")
 #'
-#' # Run all bested models
+#' # Run all bested models with custom directory and CI settings
 #' models_to_run <- get_all_bested_models()
-#' run_batch_bested(models_to_run, user = "lbw", n_sim_mbb = 500, train_test_date = "2025-12-30")
+#' run_batch_bested(models_to_run, user = "lbw", n_sim_mbb = 500, 
+#'                  train_test_date = "2025-12-30", bested_dir = "bested",
+#'                  ci_method = "symmetric_sd", ensure_nonnegative = TRUE)
 #'
-run_batch_bested <- function(models_to_run, user = NULL, n_sim_mbb = NULL, train_test_date = NULL, path_onedrive = NULL) {
+run_batch_bested <- function(models_to_run, user = NULL, n_sim_mbb = NULL, 
+                             train_test_date = NULL, path_onedrive = NULL, 
+                             bested_dir = NULL, ci_method = NULL, 
+                             ensure_nonnegative = NULL, model_path = NULL) {
   # Get path_onedrive from environment if not provided
   if (is.null(path_onedrive)) {
     if (!exists("path_onedrive", envir = .GlobalEnv)) {
@@ -234,8 +158,11 @@ run_batch_bested <- function(models_to_run, user = NULL, n_sim_mbb = NULL, train
     path_onedrive <- get("path_onedrive", envir = .GlobalEnv)
   }
   
-  # Clean up TRAIN_TEST_DATE env var on exit if we set it
+  # Set train_test_date in environment if provided (before calling run_pipeline)
   if (!is.null(train_test_date)) {
+    Sys.setenv(TRAIN_TEST_DATE = train_test_date)
+    cat("Setting TRAIN_TEST_DATE to:", train_test_date, "\n")
+    # Clean up TRAIN_TEST_DATE env var on exit if we set it
     on.exit({
       if (Sys.getenv("TRAIN_TEST_DATE", unset = "") != "") {
         Sys.unsetenv("TRAIN_TEST_DATE")
@@ -246,6 +173,14 @@ run_batch_bested <- function(models_to_run, user = NULL, n_sim_mbb = NULL, train
   # Prompt for user if not provided
   if (is.null(user)) {
     user <- readline(prompt = "Enter user name (lbw or akd): ")
+  }
+  
+  # Compute model_path from user if not provided
+  if (is.null(model_path)) {
+    model_path <- paste0(path_onedrive, "02_output/models/", user, "/")
+    cat("Using model path (from user):", model_path, "\n")
+  } else {
+    cat("Using model path (provided):", model_path, "\n")
   }
   
   # Validate models_to_run
@@ -259,11 +194,25 @@ run_batch_bested <- function(models_to_run, user = NULL, n_sim_mbb = NULL, train
   # Step 2: Verify configs exist in bested folder
   #-------------------------------
   cat("Verifying configs...\n")
-  models_dir <- paste0(path_onedrive, "02_output/models/")
-  bested_dir <- paste0(models_dir, "bested/")
+  bested_dir_path <- paste0(bested_dir, "/")
+  configs_dir_path <- paste0(bested_dir, "/configs/")
+  
+  # Check if directory exists
+  if (!dir.exists(bested_dir_path)) {
+    stop("Bested directory does not exist: ", bested_dir_path)
+  }
+  
+  # Check if configs subdirectory exists
+  if (!dir.exists(configs_dir_path)) {
+    stop("Configs directory does not exist: ", configs_dir_path)
+  }
 
   missing_configs <- list()
   valid_models <- list()
+  valid_config_paths <- list()
+  
+  # Get all config files in directory for debugging
+  all_configs <- list.files(configs_dir_path, pattern = "_config\\.yaml$", full.names = FALSE)
   
   for (i in seq_along(models_to_run)) {
     model <- models_to_run[[i]]
@@ -274,28 +223,44 @@ run_batch_bested <- function(models_to_run, user = NULL, n_sim_mbb = NULL, train
     pattern <- paste0("^", model$encounter_type, "_", 
                       model$exposure_category, "_", 
                       cause_escaped, "_(akd|lbw)_model_run_.*_config\\.yaml$")
-    config_files <- list.files(bested_dir, pattern = pattern, full.names = TRUE)
+    config_files <- list.files(configs_dir_path, pattern = pattern, full.names = TRUE)
     
     if (length(config_files) == 0) {
       missing_configs[[length(missing_configs) + 1]] <- model
       cat("  ✗ Missing:", model$encounter_type, "-", model$exposure_category, "-", model$cause, "\n")
+      cat("     Pattern:", pattern, "\n")
     } else if (length(config_files) > 1) {
       cat("  ⚠ Multiple configs found for:", model$encounter_type, "-", model$exposure_category, "-", model$cause, "\n")
       cat("     Using:", basename(config_files[1]), "\n")
       valid_models[[length(valid_models) + 1]] <- model
+      valid_config_paths[[length(valid_config_paths) + 1]] <- config_files[1]
     } else {
       cat("  ✓ Found:", basename(config_files[1]), "\n")
       valid_models[[length(valid_models) + 1]] <- model
+      valid_config_paths[[length(valid_config_paths) + 1]] <- config_files[1]
     }
   }
   
   if (length(missing_configs) > 0) {
     cat("\n⚠ Warning:", length(missing_configs), "model(s) missing configs in bested folder\n")
+    cat("Looking in:", configs_dir_path, "\n")
+    if (length(all_configs) > 0) {
+      cat("Available config files (first 20):\n")
+      for (cfg in head(all_configs, 20)) {
+        cat("  -", cfg, "\n")
+      }
+      if (length(all_configs) > 20) {
+        cat("  ... and", length(all_configs) - 20, "more\n")
+      }
+    } else {
+      cat("No config files found in directory.\n")
+    }
     cat("These will be skipped.\n\n")
   }
   
   if (length(valid_models) == 0) {
-    stop("No valid models found in bested folder")
+    stop("No valid models found in bested folder: ", configs_dir_path,
+         if(length(all_configs) > 0) paste0("\nFound ", length(all_configs), " config file(s) but none matched the requested models.") else "\nNo config files found in directory.")
   }
   
   cat("\nFound", length(valid_models), "valid model(s) to run\n\n")
@@ -315,13 +280,16 @@ run_batch_bested <- function(models_to_run, user = NULL, n_sim_mbb = NULL, train
   
   for (i in seq_along(valid_models)) {
     model <- valid_models[[i]]
+    config_path <- valid_config_paths[[i]]
     
     cat("\n[", i, "/", length(valid_models), "] ", 
         model$encounter_type, " - ", model$exposure_category, " - ", model$cause, "\n", sep = "")
     
-    # Run the pipeline using bested_model lookup
+    # Run the pipeline using the config path we already found
     tryCatch({
-      run_pipeline(bested_model = model, user = user, n_sim_mbb = n_sim_mbb, train_test_date = train_test_date)
+      run_pipeline(config_path = config_path, user = user, n_sim_mbb = n_sim_mbb, 
+                   train_test_date = train_test_date, ci_method = ci_method, 
+                   ensure_nonnegative = ensure_nonnegative, model_path = model_path)
       cat("\n✓ Successfully completed model", i, "of", length(valid_models), "\n")
       successful_models[[length(successful_models) + 1]] <- model
     }, error = function(e) {
