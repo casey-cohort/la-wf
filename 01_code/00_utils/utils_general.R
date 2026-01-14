@@ -364,6 +364,16 @@ setup_parallel_processing <- function(config) {
 #' models_path <- get_models_path(path_onedrive, user = "lbw")
 #'
 get_models_path <- function(path_onedrive, user = NULL) {
+  # Check if MODEL_PATH environment variable is set (from run_pipeline with model_path parameter)
+  env_model_path <- Sys.getenv("MODEL_PATH", unset = "")
+  if (env_model_path != "") {
+    # Create directory if it doesn't exist
+    if (!dir.exists(env_model_path)) {
+      dir.create(env_model_path, recursive = TRUE, showWarnings = FALSE)
+    }
+    return(env_model_path)
+  }
+  
   if (is.null(user)) {
     # Try to get from config if available
     config_file <- paste0(getwd(), "/01_code/02_analysis/model_config.yaml")
@@ -619,6 +629,7 @@ load_encounter_data <- function(train_test_path, file_name, exposure, enc) {
 #'
 create_time_series_split <- function(df_train_test, config) {
   splits <- df_train_test %>%
+    dplyr::ungroup() %>%  # Ensure data is ungrouped before splitting
     timetk::time_series_split(
       assess = config$train_test_params$assess_split,
       cumulative = TRUE,

@@ -14,14 +14,17 @@ outcome_type: 'rate'
 # OPTION 1: Uncomment to use cartesian product
 # models_to_run:
 #   encounter_type: ["ED"]
-#   exposure_category: ["mid_smoke"]
-#   cause: ["enc_cardio", "enc_injury"]
+#   exposure_category: ["evac"]
+#   cause: ["enc_resp", "enc_cardio", "enc_injury", "enc_neuro"]
 
 # OPTION 2: Currently active (comment out to use models_to_run instead)
 models_to_run_flat:
+  # - encounter_type: "ED"
+  #   exposure_category: "evac"
+  #   cause: "enc_cardio"
   - encounter_type: "ED"
     exposure_category: "none"
-    cause: "enc_cardio"
+    cause: "enc_neuro"
 
 grid_params:
   # XGBoost parameters - more conservative to reduce overfitting
@@ -41,7 +44,7 @@ grid_params:
     range: [-5, 1]
     tune: true
   stop_iter:
-    range: [10, 20]
+    range: [10, 50]
     tune: true
   # New XGBoost parameters for regularization
   trees:
@@ -53,7 +56,7 @@ grid_params:
   # Prophet changepoint parameters for trend regularization
   changepoint_num:
     range: [18, 28] # default is 25
-    tune: true
+    tune: false
   changepoint_range:
     range: [0.6, 0.9] # default is 0.8
     tune: false
@@ -67,7 +70,7 @@ train_test_params:
   skip_cv: "14 days"
   slice_limit_cv: 5
   holdout_date: "2025-01-06"  # Dates after this are considered holdout period
-  validation: 0.05  # XGBoost internal validation split for early stopping
+  validation: 0.1  # XGBoost internal validation split for early stopping
 # can give a list of combinations so we can try many things -- so maybe increments of 5 and all combos.
 
 # Grid size for hyperparameter tuning
@@ -87,38 +90,12 @@ rates_denom: 100000
 
 # Confidence Interval Configuration
 ci_params:
-  method: "symmetric_sd"  # Options: "quantile", "symmetric_sd"
+  method: "quantile"  # Options: "quantile", "symmetric_sd"
   level: 0.95         # Confidence level (0-1)
-  ensure_nonnegative: false  # For count outcomes, truncate at 0
+  ensure_nonnegative: true  # For count outcomes, truncate at 0
 
 # Number of CPU cores to leave free (used by both tuning and MBB scripts)
 cores_to_leave_out: 2
 
 # model description
 model_description: "Balanced hyperparameters"
-
-# For later, we want to be able to have different sets of params run
-# for specific models. Here's an idea of how to do that.
-# Create a top level params key.  In params, have a global config
-# and then override configs for specific models. E.g.
-#
-# params:
-#   global:
-#     grid_params:
-#       mtry: [3, 10]
-#       min_n: [5, 30]
-#       tree_depth: [3, 8]
-#       learn_rate: [0.01, 0.1]
-#       loss_reduction: [-5, 1]
-#       stop_iter: [10, 50]
-#   overrides:
-#     - encounter_type: "IP"
-#       exposure_category: "evac"
-#       cause: "num_enc_resp"
-#       grid_params:
-#         mtry: [5, 15]
-#         min_n: [10, 50]
-#         tree_depth: [5, 10]
-#         learn_rate: [0.05, 0.2]
-#         loss_reduction: [-3, 3]
-#         stop_iter: [20, 60]

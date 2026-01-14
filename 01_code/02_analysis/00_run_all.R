@@ -60,8 +60,41 @@ run_timed_step <- function(step_num, step_name, script_path, step_times) {
   return(step_times)
 }
 
-# Main pipeline function
-run_pipeline <- function(config_path = NULL, bested_model = NULL, user = NULL, n_sim_mbb = NULL, train_test_date = NULL) {
+#' Run complete Prophet + XGBoost analysis pipeline
+#'
+#' Runs the complete analysis pipeline including model tuning, MBB confidence intervals,
+#' and output generation. Can use a config file directly or look up configs from the bested folder.
+#'
+#' @param config_path Optional path to a specific config YAML file. If NULL, uses default model_config.yaml
+#' @param bested_model Optional model specification list with encounter_type, exposure_category, and cause.
+#'                     If provided, looks up config from bested folder.
+#' @param user User name (lbw or akd). Determines where outputs are saved.
+#'             If NULL, uses value from config file.
+#' @param n_sim_mbb Optional number of MBB simulations to override config default
+#' @param train_test_date Optional date string (YYYY-MM-DD) to avoid prompting multiple times
+#' @param ci_method Optional CI method override. Options: "quantile" or "symmetric_sd".
+#'                  If NULL, uses value from config file.
+#' @param ensure_nonnegative Optional override for ensure_nonnegative setting.
+#'                           If NULL, uses value from config file.
+#' @param model_path Optional path to models directory. If NULL, computed from config$user.
+#'                   When called from run_batch_bested(), uses the user parameter to compute this.
+#'
+#' @return Invisibly returns NULL. Results are saved to output directory.
+#'
+#' @examples
+#' # Default usage (uses model_config.yaml)
+#' run_pipeline()
+#'
+#' # Custom config file
+#' run_pipeline(config_path = "/path/to/config.yaml")
+#'
+#' # Run bested model with overrides
+#' run_pipeline(bested_model = list(encounter_type = "ED", 
+#'                                   exposure_category = "high_smoke", 
+#'                                   cause = "rate_enc"),
+#'              n_sim_mbb = 500, ci_method = "symmetric_sd", ensure_nonnegative = TRUE)
+#'
+run_pipeline <- function(config_path = NULL, bested_model = NULL, user = NULL, n_sim_mbb = NULL, train_test_date = NULL, ci_method = NULL, ensure_nonnegative = NULL, model_path = NULL) {
   # Initialize timing variables
   pipeline_start_time <- Sys.time()
   step_times <- list()
@@ -121,23 +154,55 @@ run_pipeline <- function(config_path = NULL, bested_model = NULL, user = NULL, n
     cat("Found bested config:", basename(config_path), "\n")
   }
   
-  # Handle config path override and n_sim_mbb modification
+  # Handle config path override and parameter modifications
   if (!is.null(config_path)) {
-    # If n_sim_mbb override is requested, modify config and save to temp file
-    if (!is.null(n_sim_mbb)) {
+    # Check if any overrides are requested
+    has_overrides <- !is.null(n_sim_mbb) || !is.null(ci_method) || !is.null(ensure_nonnegative)
+    
+    if (has_overrides) {
+      # Read config and apply overrides
       config <- yaml::read_yaml(config_path)
-      config$n_sim_mbb <- n_sim_mbb
+      
+      if (!is.null(n_sim_mbb)) {
+        config$n_sim_mbb <- n_sim_mbb
+        cat("Modified n_sim_mbb to", n_sim_mbb, "\n")
+      }
+      
+      if (!is.null(ci_method)) {
+        # Ensure ci_params exists
+        if (is.null(config$ci_params)) {
+          config$ci_params <- list()
+        }
+        config$ci_params$method <- ci_method
+        cat("Modified ci_method to", ci_method, "\n")
+        
+        # Ensure ci_level has a default if not present in bested config
+        if (is.null(config$ci_params$level)) {
+          config$ci_params$level <- 0.95
+          cat("Set ci_level to default 0.95\n")
+        }
+      }
+      
+      if (!is.null(ensure_nonnegative)) {
+        # Ensure ci_params exists
+        if (is.null(config$ci_params)) {
+          config$ci_params <- list()
+        }
+        config$ci_params$ensure_nonnegative <- ensure_nonnegative
+        cat("Modified ensure_nonnegative to", ensure_nonnegative, "\n")
+      }
+      
+      # Write modified config to temp file
       temp_config <- tempfile(fileext = ".yaml")
       yaml::write_yaml(config, temp_config)
       config_path <- temp_config
-      cat("Modified n_sim_mbb to", n_sim_mbb, "\n")
       # Clean up temp file on exit
       on.exit(unlink(temp_config), add = TRUE)
     }
     
     # Set TEST_CONFIG_PATH for all scripts to use
     Sys.setenv(TEST_CONFIG_PATH = config_path)
-    cat("Using config file:", ifelse(is.null(n_sim_mbb), config_path, basename(config_path)), "\n\n")
+    cat("Using config file:", ifelse(has_overrides, basename(config_path), config_path), "\n\n")
     # Ensure cleanup on exit (even if pipeline fails)
     on.exit(Sys.unsetenv("TEST_CONFIG_PATH"), add = TRUE)
   }
@@ -150,6 +215,13 @@ run_pipeline <- function(config_path = NULL, bested_model = NULL, user = NULL, n
     Sys.setenv(TRAIN_TEST_DATE = train_test_date)
     cat("Using train/test data from:", train_test_date, "\n")
     on.exit(Sys.unsetenv("TRAIN_TEST_DATE"), add = TRUE)
+  }
+  
+  # Set model_path in environment if provided (allows run_batch_bested to override config$user)
+  if (!is.null(model_path)) {
+    Sys.setenv(MODEL_PATH = model_path)
+    cat("Using model path:", model_path, "\n")
+    on.exit(Sys.unsetenv("MODEL_PATH"), add = TRUE)
   }
   
   cat("Starting analysis pipeline...\n\n")
@@ -212,6 +284,3 @@ run_pipeline <- function(config_path = NULL, bested_model = NULL, user = NULL, n
   cat("Results saved to:", latest_dir, "\n")
   cat("Analysis complete!\n")
 }
-run_pipeline()
-
-beepr::beep()

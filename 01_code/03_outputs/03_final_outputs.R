@@ -3,59 +3,76 @@
 # Generate final outputs - extract best model PDFs and configs from manual selection
 #-------------------------------
 
-# Initial Setup ----
-pacman::p_load(tidyverse, here, yaml, gt)
+# Note: Before running this script, manually update 'best_model_versions_manual.xlsx' with the final models to use.
 
-# Set paths
+# Initial Setup ----
+pacman::p_load(tidyverse, here, yaml, gt, writexl)
+
+## Set paths
 source(paste0(getwd(), "/01_code/paths.R"))
 source(paste0(getwd(), "/01_code/00_utils/utils_general.R"))
 source(paste0(getwd(), "/01_code/00_utils/utils_outputs.R"))
-source(paste0(getwd(), "/01_code/00_utils/utils_best_tuned.R"))
 
+## Set outcome type
+outcome_type <- "rate"
 
-# Read config to get user and outcome_type
-config_file <- paste0(getwd(), "/01_code/02_analysis/model_config.yaml")
-config <- yaml::read_yaml(config_file)
-outcome_type <- config$outcome_type
-ci_method <- config$ci_params$method
-ci_level <- config$ci_params$level
+## Set aggregation period (number of days from Jan 7)
+## Set to NULL to use all holdout data (Jan 7 - Jan 21)
+num_days_agg <- 5
 
-# Define directory paths
+## Define directory paths
 models_dir <- here(path_onedrive, "02_output/models/")
 model_comparisons_dir <- paste0(models_dir, "/model_comparisons/")
+
+## Create outputs directory
+outputs_dir <- paste0(path_onedrive, "02_output/final_outputs/")
+
+## Create configs directory
+configs_dir <- paste0(outputs_dir, "/configs/")
+dir.create(configs_dir, showWarnings = FALSE)
+
+## Create plots directory
+plots_dir <- paste0(outputs_dir, "/plots/")
+dir.create(plots_dir, showWarnings = FALSE)
+
+## Create tables subdirectory in bested_final
+tables_dir <- paste0(outputs_dir, "excess_hospitalizations/")
+dir.create(tables_dir, recursive = TRUE, showWarnings = FALSE)
+
+## Create subdirectory for individual files
+individual_files_dir <- paste0(tables_dir, "individual_files/")
+dir.create(individual_files_dir, recursive = TRUE, showWarnings = FALSE)
+
 
 #-------------------------------
 # Step-1: Extract final PDFs and Configs
 #-------------------------------
 cat("=== Step 1: Extract Final PDFs and Configs ===\n")
 
-# Read manual best model selection CSV
-csv_file <- paste0(model_comparisons_dir, "model_comparison_best_manual.csv")
+## Read manual best model selection xlsx
+xlsx_file <- paste0(model_comparisons_dir, "model_versions_manual_for_final_outputs.xlsx")
 
-if (!file.exists(csv_file)) {
-  stop("CSV file not found: ", csv_file, "\n",
-       "Please create model_comparison_best_manual.csv in ", model_comparisons_dir)
+if (!file.exists(xlsx_file)) {
+  stop("XLSX file not found: ", xlsx_file, "\n",
+       "Please create best_model_versions_manual.xlsx in ", model_comparisons_dir)
 }
 
-cat("Reading best model selections from:", csv_file, "\n")
-best_models_manual <- read.csv(csv_file, stringsAsFactors = FALSE)
+cat("Reading best model selections from:", xlsx_file, "\n")
+best_models_manual <- readxl::read_xlsx(xlsx_file) |> as.data.frame()
 
 # Validate required columns
 required_cols <- c("enc_type", "exposure_category", "cause", "source_dir", "version")
 missing_cols <- setdiff(required_cols, colnames(best_models_manual))
 
 if (length(missing_cols) > 0) {
-  stop("CSV file is missing required columns: ", paste(missing_cols, collapse = ", "), "\n",
+  stop("XLSX file is missing required columns: ", paste(missing_cols, collapse = ", "), "\n",
        "Required columns: ", paste(required_cols, collapse = ", "))
 }
 
 cat("  Found", nrow(best_models_manual), "model(s) to extract\n")
 
 # Extract PDFs and configs to separate directories
-bested_final_dir <- paste0(models_dir, "/bested_final/")
-configs_dir <- paste0(bested_final_dir, "/configs/")
-plots_dir <- paste0(bested_final_dir, "/plots/")
-extract_best_model_files(best_models_manual, models_dir, bested_final_dir, 
+extract_best_model_files(best_models_manual, models_dir, outputs_dir, 
                          pdf_dir = plots_dir, config_dir = configs_dir)
 
 cat("\nStep 1 complete!\n\n")
@@ -65,13 +82,9 @@ cat("\nStep 1 complete!\n\n")
 #-------------------------------
 cat("=== Step 2: Calculate Excess Hospitalizations ===\n")
 
-# Create tables subdirectory in bested_final
-tables_dir <- paste0(bested_final_dir, "excess_hospitalizations/")
-dir.create(tables_dir, recursive = TRUE, showWarnings = FALSE)
-
-# Create subdirectory for individual files
-individual_files_dir <- paste0(tables_dir, "individual_files/")
-dir.create(individual_files_dir, recursive = TRUE, showWarnings = FALSE)
+# Set CI parameters (matching model_config.yaml)
+ci_method <- "quantile"
+ci_level <- 0.95
 
 # Initialize storage for excess results
 all_excess_results <- list()
@@ -141,7 +154,8 @@ for (i in 1:nrow(best_models_manual)) {
       mbb_result = holdout_MBB,
       outcome_type = outcome_type,
       ci_method = ci_method,
-      ci_level = ci_level
+      ci_level = ci_level,
+      num_days_agg = num_days_agg
     )
     
     if (is.null(excess_results)) {
@@ -168,9 +182,9 @@ for (i in 1:nrow(best_models_manual)) {
     all_excess_results[[combo_key]] <- result_combined
     
     # Save individual excess hospitalization table
-    excess_csv <- paste0(individual_files_dir, "excess_hosp_", enc_type, "_", exposure_category, "_", cause, ".csv")
-    write.csv(result_combined, excess_csv, row.names = FALSE)
-    cat("  Saved to:", excess_csv, "\n\n")
+    excess_xlsx <- paste0(individual_files_dir, "excess_hosp_", enc_type, "_", exposure_category, "_", cause, ".xlsx")
+    writexl::write_xlsx(result_combined, excess_xlsx)
+    cat("  Saved to:", excess_xlsx, "\n\n")
     
   }, error = function(e) {
     cat("  ERROR processing model:", as.character(e), "\n")
@@ -185,8 +199,8 @@ if (length(all_excess_results) > 0) {
   all_excess <- bind_rows(all_excess_results)
   
   # Save daily results (includes both period and daily rows)
-  excess_daily_file <- paste0(individual_files_dir, "combined_excess_hospitalizations_daily.csv")
-  write.csv(all_excess, excess_daily_file, row.names = FALSE)
+  excess_daily_file <- paste0(individual_files_dir, "combined_excess_hospitalizations_daily.xlsx")
+  writexl::write_xlsx(all_excess, excess_daily_file)
   cat("Daily excess hospitalizations saved to:", excess_daily_file, "\n")
   cat("  Rows:", nrow(all_excess), "\n")
   
@@ -196,9 +210,9 @@ if (length(all_excess_results) > 0) {
     slice(1) %>%  # First row is the total period
     ungroup()
   
-  # Save period results as CSV
-  excess_period_file <- paste0(tables_dir, "excess_hospitalizations_period.csv")
-  write.csv(excess_summary, excess_period_file, row.names = FALSE)
+  # Save period results as XLSX
+  excess_period_file <- paste0(tables_dir, "excess_hospitalizations_period.xlsx")
+  writexl::write_xlsx(excess_summary, excess_period_file)
   cat("Period excess hospitalizations saved to:", excess_period_file, "\n")
   cat("  Rows:", nrow(excess_summary), "\n")
   
@@ -234,3 +248,4 @@ if (length(all_excess_results) > 0) {
 }
 
 cat("\nStep 2 complete!\n\n")
+
