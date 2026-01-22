@@ -18,7 +18,7 @@ outcome_type <- "rate"
 
 ## Set aggregation durations (array of days from Jan 7 for aggregation)
 ## Each value will produce a separate aggregated output file
-agg_duration_array <- c(2, 3, 4, 5, 6, 7, 14, 21)
+agg_duration_array <- c(2, 3, 4, 5, 6, 7, 14, 21, 25)
 
 ## Define directory paths
 models_dir <- here(path_onedrive, "03_modeling-and-results/01_modeling/")

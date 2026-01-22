@@ -1,4 +1,3 @@
- ``
 ## ---------------------------
 ## LA 2025 Wildfires - Daily Excess Plots
 ## Adapted from EMB & LBW code
@@ -15,20 +14,25 @@
 if(!requireNamespace('pacman', quietly = TRUE)) install.packages('pacman') 
 pacman::p_load(readr, readxl, snakecase, lubridate, purrr,
                dplyr, tidyr, stringr, forcats, cowplot,
-               ggplot2, patchwork, gridExtra, ggtext)
+               ggplot2, patchwork, gridExtra, ggtext, here)
+
+# Set paths (centralized in repo)
+source(paste0(getwd(), "/01_code/paths.R"))
 
 # =============================================================================
 # PARAMETERS
 # =============================================================================
-num_days <- 7                # number of days to plot (must match available aggregated file)
+num_days <- 14                # number of days to plot (must match available aggregated file)
 include_no_exposure <- FALSE  # TRUE for supplement, FALSE for main manuscript
+aggregate_to_weekly <- TRUE   # if TRUE, aggregate daily results into 7-day bins for plotting
+weekly_x_labels <- "week"     # "week" (Week 1/2/3...) or "range" (YYYY-MM-DD - YYYY-MM-DD); only used when aggregate_to_weekly = TRUE
 
 # paths
-rootdir_daily <- "/Users/laurenwilner/Library/CloudStorage/OneDrive-SharedLibraries-UW/casey_cohort - Documents/studies/la_wf_pm_evac_its/02_output/final_outputs/excess_hospitalizations/daily/" # folder containing the 40 xlsx files
-
-rootdir_aggregated <- "/Users/laurenwilner/Library/CloudStorage/OneDrive-SharedLibraries-UW/casey_cohort - Documents/studies/la_wf_pm_evac_its/02_output/final_outputs/excess_hospitalizations/aggregated/" # folder containing the aggregated xlsx files
-
-output_dir <- "/Users/laurenwilner/Library/CloudStorage/OneDrive-SharedLibraries-UW/casey_cohort - Documents/studies/la_wf_pm_evac_its/02_output/final_outputs/excess_hospitalizations/plots/" # where to save plots
+tables_dir <- paste0(path_onedrive, "03_modeling-and-results/04_bested-results/")
+rootdir_daily <- paste0(tables_dir, "daily/")          # folder containing the daily xlsx files
+rootdir_aggregated <- paste0(tables_dir, "aggregated/") # folder containing the aggregated xlsx files
+output_dir <- paste0(tables_dir, "plots/")             # where to save plots
+dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
 
 # =============================================================================
 # READ DATA
@@ -130,6 +134,18 @@ results <- results %>%
   arrange(date) %>%
   filter(date <= min(date) + days(num_days - 1))
 
+# warn if requested num_days exceeds what's available upstream
+available_days <- n_distinct(results$date)
+if (available_days < num_days) {
+  warning(
+    "Requested num_days = ", num_days, " but only ", available_days,
+    " day(s) are available in the daily xlsx outputs (",
+    as.character(min(results$date, na.rm = TRUE)), " to ",
+    as.character(max(results$date, na.rm = TRUE)), ").\n",
+    "This is upstream of plotting (i.e., the daily excess outputs only contain that many days)."
+  )
+}
+
 # filter out "none" exposure if not including it
 if (!include_no_exposure) {
   results <- results %>% filter(exposure != "none")
@@ -138,6 +154,65 @@ if (!include_no_exposure) {
   # update factor levels
   results$exposure <- droplevels(results$exposure)
   cumulative_results$exposure <- droplevels(cumulative_results$exposure)
+}
+
+# =============================================================================
+# OPTIONAL: AGGREGATE DAILY RESULTS TO WEEKLY BINS (FOR PLOTTING)
+# =============================================================================
+
+if (aggregate_to_weekly) {
+  week_len_days <- 7L
+  start_date <- min(results$date, na.rm = TRUE)
+  end_date <- max(results$date, na.rm = TRUE)
+  has_observed <- "observed" %in% names(results)
+  has_expected <- "expected" %in% names(results)
+  
+  # Assign each day to a week bin starting at start_date
+  results <- results %>%
+    mutate(
+      week_index = as.integer(floor(as.numeric(difftime(date, start_date, units = "days")) / week_len_days)) + 1L,
+      week_start = start_date + days((week_index - 1L) * week_len_days),
+      week_end = pmin(week_start + days(week_len_days - 1L), end_date),
+      week_range = paste0(format(week_start, "%Y-%m-%d"), " - ", format(week_end, "%Y-%m-%d")),
+      week_label = paste0("Week ", week_index),
+      # pick weekly x-axis label style ONCE (weekly_x_labels is a scalar parameter)
+      period_week = if (identical(weekly_x_labels, "range")) week_range else week_label
+    ) %>%
+    group_by(enc_type, exposure_category, cause, week_index, week_start, week_end, week_range, week_label) %>%
+    summarise(
+      # Keep a representative date for plotting (use week_start)
+      date = week_start,
+      period = first(period_week),
+      
+      # Aggregate counts over the week (approximate CI aggregation by summing bounds)
+      observed = if (has_observed) sum(observed, na.rm = TRUE) else NA_real_,
+      expected = if (has_expected) sum(expected, na.rm = TRUE) else NA_real_,
+      
+      excess_estimate = sum(excess_estimate, na.rm = TRUE),
+      excess_lci = sum(excess_lci, na.rm = TRUE),
+      excess_uci = sum(excess_uci, na.rm = TRUE),
+      
+      # Recompute percent excess from aggregated excess/expected when available
+      excess_pct_estimate = dplyr::if_else(!is.na(expected) && expected != 0,
+                                          (excess_estimate / expected) * 100,
+                                          mean(excess_pct_estimate, na.rm = TRUE)),
+      excess_pct_lci = dplyr::if_else(!is.na(expected) && expected != 0,
+                                     (excess_lci / expected) * 100,
+                                     mean(excess_pct_lci, na.rm = TRUE)),
+      excess_pct_uci = dplyr::if_else(!is.na(expected) && expected != 0,
+                                     (excess_uci / expected) * 100,
+                                     mean(excess_pct_uci, na.rm = TRUE)),
+      .groups = "drop"
+    ) %>%
+    arrange(date) %>%
+    mutate(period = factor(period, levels = unique(period))) %>%
+    # Re-run the standard cleaning to restore factor variables / labels
+    clean_results()
+  
+  # Keep a simple mapping for reference when using "Week 1/2/3..." labels
+  week_map <- results %>%
+    distinct(week_index, week_label, week_range) %>%
+    arrange(week_index)
 }
 
 # =============================================================================
@@ -205,7 +280,7 @@ plot_estimates <- function(data, visit, encounter, prefix) {
   
   # create the plot
   week_plot <- plot_data %>% 
-    ggplot(aes(x = date, 
+    ggplot(aes(x = if (aggregate_to_weekly) period else date, 
                y = !!sym(paste0(prefix, "_estimate")), 
                color = exposure)) +
     geom_point(position = position_dodge(width = 0.6), size = 2.75) +
@@ -218,16 +293,29 @@ plot_estimates <- function(data, visit, encounter, prefix) {
     geom_hline(yintercept = 0, linetype = "dashed", color = "black") +
     theme_minimal(base_size = 22) +
     theme(plot.title = element_text(hjust = 0, size = 26, face = "bold"),
-          axis.text.x = element_text(angle = 90, vjust = 0.5),
+          axis.text.x = element_text(
+            angle = if (aggregate_to_weekly) 0 else 90,
+            vjust = if (aggregate_to_weekly) 0.5 else 0.5,
+            hjust = if (aggregate_to_weekly) 0.5 else 1,
+            margin = margin(t = 0)
+          ),
           panel.grid.major.x = element_blank(),
           panel.grid.minor.x = element_blank(),
           panel.grid.major.y = element_blank(),
           panel.grid.minor.y = element_blank(),
           axis.line = element_line(color = "darkgrey", linewidth = 0.5),
           legend.position = "none") +
-    scale_x_date(date_breaks = "1 day", date_labels = "%Y-%m-%d",
-                 expand = expansion(add = 0.5)) +
     labs(x = NULL, y = y_axis_label, title = plot_title)
+  
+  if (aggregate_to_weekly) {
+    week_plot <- week_plot + scale_x_discrete(drop = FALSE)
+  } else {
+    week_plot <- week_plot + scale_x_date(
+      date_breaks = "1 day",
+      date_labels = "%Y-%m-%d",
+      expand = expansion(add = 0.5)
+    )
+  }
   
   return(week_plot)
 }
@@ -341,6 +429,15 @@ plot_width <- max(24, n_days * 1.5 + 8)  # extra width for cumulative plots
 # create filename suffix based on whether no exposure is included
 exposure_suffix <- if (include_no_exposure) "_with_none" else "_no_none"
 
+# build week-definitions caption for plots (only used in weekly mode with "week" labels)
+week_caption <- ""
+if (aggregate_to_weekly && identical(weekly_x_labels, "week") && exists("week_map")) {
+  week_caption <- paste0(
+    apply(week_map, 1, function(r) paste0(r[["week_label"]], " = ", r[["week_range"]])),
+    collapse = "    "
+  )
+}
+
 ## excess raw ---------------------------
 ed_excess <- (ed_enc_plot / ed_cardio_plot / ed_injury_plot / ed_neuro_plot / ed_resp_plot)
 ed_cum <- (ed_enc_cum / ed_cardio_cum / ed_injury_cum / ed_neuro_cum / ed_resp_cum)
@@ -348,8 +445,10 @@ ip_excess <- (ip_enc_plot / ip_cardio_plot / ip_injury_plot / ip_neuro_plot / ip
 ip_cum <- (ip_enc_cum / ip_cardio_cum / ip_injury_cum / ip_neuro_cum / ip_resp_cum)
 
 full_excess <- (ed_excess | ed_cum | ip_excess | ip_cum) +
-  plot_layout(guides = "collect", widths = c(4, 1, 4, 1)) & 
-  theme(legend.position = "bottom")
+  plot_layout(guides = "collect", widths = c(4, 1, 4, 1)) +
+  plot_annotation(caption = week_caption) &
+  theme(legend.position = "bottom",
+        plot.caption = element_text(hjust = 0.5, size = 14))
 
 png(paste0(output_dir, "full_excess_", num_days, "days", exposure_suffix, ".png"), 
     width = plot_width, height = 22, units = "in", res = 300)
@@ -363,8 +462,10 @@ ip_pct_excess <- (pct_ip_enc_plot / pct_ip_cardio_plot / pct_ip_injury_plot / pc
 ip_pct_cum <- (pct_ip_enc_cum / pct_ip_cardio_cum / pct_ip_injury_cum / pct_ip_neuro_cum / pct_ip_resp_cum)
 
 full_pct_excess <- (ed_pct_excess | ed_pct_cum | ip_pct_excess | ip_pct_cum) +
-  plot_layout(guides = "collect", widths = c(4, 1, 4, 1)) & 
-  theme(legend.position = "bottom")
+  plot_layout(guides = "collect", widths = c(4, 1, 4, 1)) +
+  plot_annotation(caption = week_caption) &
+  theme(legend.position = "bottom",
+        plot.caption = element_text(hjust = 0.5, size = 14))
 
 png(paste0(output_dir, "full_pct_excess_", num_days, "days", exposure_suffix, ".png"), 
     width = plot_width, height = 22, units = "in", res = 300)
@@ -374,3 +475,8 @@ dev.off()
 message("Plots saved to: ", output_dir)
 message("  - full_excess_", num_days, "days", exposure_suffix, ".png")
 message("  - full_pct_excess_", num_days, "days", exposure_suffix, ".png")
+
+if (aggregate_to_weekly && identical(weekly_x_labels, "week") && exists("week_map")) {
+  message("Weekly bins used (for reference):")
+  apply(week_map, 1, function(r) message("  - ", r[["week_label"]], ": ", r[["week_range"]]))
+}
