@@ -12,8 +12,8 @@ source(paste0(getwd(), "/01_code/00_utils/utils_outputs.R"))
 source(paste0(getwd(), "/01_code/00_utils/utils_best_tuned.R"))
 
 ## Identify model directories
-models_dir <- here(path_onedrive, "02_output/models/")
-model_comparisons_dir <- paste0(models_dir, "/model_comparisons/")
+models_dir <- here(path_onedrive, "03_modeling-and-results/01_modeling/")
+model_comparisons_dir <- paste0(path_onedrive, "03_modeling-and-results/02_best-model-selection/")
 
 ## Create temp directory to extract the configs corresponding to the best models identified manually
 temp_dir <- paste0(model_comparisons_dir, "/model_configs_for_rerun/")

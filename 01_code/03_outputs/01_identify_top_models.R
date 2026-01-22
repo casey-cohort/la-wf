@@ -18,7 +18,7 @@ outcome_type <- "rate"
 # Step-1: Extract and combine all metrics
 #-------------------------------
 cat("=== Step 1: Extract and Combine Metrics ===\n")
-models_dir <- here(path_onedrive, "02_output/models/")
+models_dir <- here(path_onedrive, "03_modeling-and-results/01_modeling/")
 
 # Define subdirectories to search
 subdirs <- c("akd", "lbw")
@@ -51,8 +51,8 @@ unique_combinations <- metrics_result$unique_combinations
 
 cat("  Found", nrow(unique_dir_version_pairs), "versions,", nrow(unique_combinations), "combinations\n")
 
-# Create model_comparisons directory if it doesn't exist
-model_comparisons_dir <- paste0(models_dir, "/model_comparisons/")
+# Create best-model-selection directory if it doesn't exist
+model_comparisons_dir <- paste0(path_onedrive, "03_modeling-and-results/02_best-model-selection/")
 dir.create(model_comparisons_dir, recursive = TRUE, showWarnings = FALSE)
 
 # Save output
