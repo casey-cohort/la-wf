@@ -21,11 +21,11 @@ outcome_type <- "rate"
 agg_duration_array <- c(2, 3, 4, 5, 6, 7, 14, 21)
 
 ## Define directory paths
-models_dir <- here(path_onedrive, "02_output/models/")
-model_comparisons_dir <- paste0(models_dir, "/model_comparisons/")
+models_dir <- here(path_onedrive, "03_modeling-and-results/01_modeling/")
+model_comparisons_dir <- paste0(path_onedrive, "03_modeling-and-results/02_best-model-selection/")
 
 ## Create outputs directory
-outputs_dir <- paste0(path_onedrive, "02_output/final_outputs/")
+outputs_dir <- paste0(path_onedrive, "03_modeling-and-results/03_bested-models/")
 
 ## Create configs directory
 configs_dir <- paste0(outputs_dir, "/configs/")
@@ -36,7 +36,7 @@ plots_dir <- paste0(outputs_dir, "/plots/")
 dir.create(plots_dir, showWarnings = FALSE)
 
 ## Create excess hospitalizations base directory
-tables_dir <- paste0(outputs_dir, "excess_hospitalizations/")
+tables_dir <- paste0(path_onedrive, "03_modeling-and-results/04_bested-results/")
 dir.create(tables_dir, recursive = TRUE, showWarnings = FALSE)
 
 ## Create daily subdirectory (one xlsx per exposure combination with all daily data)

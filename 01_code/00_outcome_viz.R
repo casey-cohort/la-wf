@@ -115,10 +115,10 @@ for(e in unique(plot_data$enc_type)){
     
 }
 
-ggsave(paste0(path_onedrive, "outcome_diagnostic.pdf"),
+ggsave(paste0(path_onedrive, "02_exploratory-plots/outcome_diagnostic.pdf"),
        marrangeGrob(plot_list_all, nrow=1, ncol=1, top=NULL),
        width = 25, height = 10, limitsize = FALSE)
 
-ggsave(paste0(path_onedrive, "outcome_diagnostic_evac_only.pdf"),
+ggsave(paste0(path_onedrive, "02_exploratory-plots/outcome_diagnostic_evac_only.pdf"),
        marrangeGrob(plot_list_evac, nrow=1, ncol=1, top=NULL),
        width = 25, height = 10, limitsize = FALSE)

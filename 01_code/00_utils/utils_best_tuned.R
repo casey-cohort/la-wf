@@ -177,7 +177,7 @@ run_batch_bested <- function(models_to_run, user = NULL, n_sim_mbb = NULL,
   
   # Compute model_path from user if not provided
   if (is.null(model_path)) {
-    model_path <- paste0(path_onedrive, "02_output/models/", user, "/")
+    model_path <- paste0(path_onedrive, "03_modeling-and-results/01_modeling/", user, "/")
     cat("Using model path (from user):", model_path, "\n")
   } else {
     cat("Using model path (provided):", model_path, "\n")

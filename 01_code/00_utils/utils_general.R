@@ -385,7 +385,7 @@ get_models_path <- function(path_onedrive, user = NULL) {
       user <- "default"
     }
   }
-  models_path <- paste0(path_onedrive, "02_output/models/", user, "/")
+  models_path <- paste0(path_onedrive, "03_modeling-and-results/01_modeling/", user, "/")
   # Create user directory if it doesn't exist
   if (!dir.exists(models_path)) {
     dir.create(models_path, recursive = TRUE, showWarnings = FALSE)

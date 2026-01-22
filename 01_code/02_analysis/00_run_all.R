@@ -13,7 +13,7 @@
 #   
 #   2. Custom config file:
 #      source("01_code/02_analysis/00_run_all.R")
-#      path <- "/Users/laurenwilner/Library/CloudStorage/OneDrive-SharedLibraries-UW/casey_cohort - Documents/studies/la_wf_pm_evac_its/02_output/models/bested/"
+#      path <- "/Users/laurenwilner/Library/CloudStorage/OneDrive-SharedLibraries-UW/casey_cohort - Documents/studies/la_wf_pm_evac_its/03_modeling-and-results/02_best-model-selection/model_configs_for_rerun/"
 #      file <- "ED_evac_rate_enc_injury_akd_model_run_2026-01-02.v006_x20_sim500_config.yaml"
 #      run_pipeline(config_path = paste0(path, file))
 #   
@@ -116,8 +116,8 @@ run_pipeline <- function(config_path = NULL, bested_model = NULL, user = NULL, n
       user <- default_config$user
     }
     
-    models_dir <- paste0(path_onedrive, "02_output/models/")
-    bested_dir <- paste0(models_dir, "bested/")
+    models_dir <- paste0(path_onedrive, "03_modeling-and-results/01_modeling/")
+    bested_dir <- paste0(path_onedrive, "03_modeling-and-results/02_best-model-selection/model_configs_for_rerun/")
     
     # Check if bested directory exists
     if (!dir.exists(bested_dir)) {
