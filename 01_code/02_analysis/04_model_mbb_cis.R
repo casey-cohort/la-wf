@@ -21,6 +21,16 @@ source(paste0(getwd(), "/01_code/00_utils/utils_mbb.R"))
 config <- read_config(paste0(getwd(), "/01_code/02_analysis/model_config.yaml"))
 n_sim <- config$n_sim_mbb
 
+# Get analysis_type from environment (set by tuning script) or config
+analysis_type <- Sys.getenv("ANALYSIS_TYPE", unset = "")
+if (analysis_type == "") {
+  analysis_type <- config$analysis_type
+  if (is.null(analysis_type) || analysis_type == "") {
+    analysis_type <- "all"
+  }
+}
+cat("Analysis type:", analysis_type, "\n")
+
 # Set MBB parameters
 L_block <- config$block_length_mbb  # Block length (days)
 seed <- config$seed
@@ -48,7 +58,7 @@ n_cores_mbb <- setup_parallel_processing(config)
 on.exit(plan(sequential), add = TRUE)
 
 # Find latest model results ----
-latest_dir <- get_output_directory(path_onedrive)
+latest_dir <- get_output_directory(path_onedrive, analysis_type = analysis_type)
 
 # Load nested results
 all_results <- load_nested_results(latest_dir)
@@ -59,7 +69,7 @@ train_test_date_env <- Sys.getenv("TRAIN_TEST_DATE")
 if (train_test_date_env == "") {
   # Fallback: use most recent train/test data if env var not set
   cat("Note: TRAIN_TEST_DATE environment variable not set. Finding most recent train/test data.\n")
-  base_path <- paste0(path_onedrive, "01_data/02_processed/train_test/")
+  base_path <- paste0(path_onedrive, "01_data/02_processed/03_train_test/")
   available_dirs <- list.dirs(base_path, full.names = FALSE, recursive = FALSE)
   # Filter for YYYY-MM-DD format and sort to get most recent
   date_dirs <- available_dirs[grepl("^\\d{4}-\\d{2}-\\d{2}$", available_dirs)]
@@ -68,9 +78,9 @@ if (train_test_date_env == "") {
   }
   most_recent_date <- sort(date_dirs, decreasing = TRUE)[1]
   cat("Using most recent train/test data from:", most_recent_date, "\n")
-  train_test_path <- get_train_test_data_path(path_onedrive, prompt_user = FALSE, date = most_recent_date)
+  train_test_path <- get_train_test_data_path(path_onedrive, prompt_user = FALSE, date = most_recent_date, analysis_type = analysis_type)
 } else {
-  train_test_path <- get_train_test_data_path(path_onedrive, prompt_user = FALSE, date = train_test_date_env)
+  train_test_path <- get_train_test_data_path(path_onedrive, prompt_user = FALSE, date = train_test_date_env, analysis_type = analysis_type)
 }
 cat("Loading train/test data from:", train_test_path, "\n\n")
 

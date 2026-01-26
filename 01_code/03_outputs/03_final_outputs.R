@@ -13,6 +13,11 @@ source(paste0(getwd(), "/01_code/paths.R"))
 source(paste0(getwd(), "/01_code/00_utils/utils_general.R"))
 source(paste0(getwd(), "/01_code/00_utils/utils_outputs.R"))
 
+## Get analysis_mode from environment (set by run_final_outputs) or default to "all"
+analysis_mode <- Sys.getenv("ANALYSIS_MODE", unset = "all")
+if (analysis_mode == "") analysis_mode <- "all"
+cat("Analysis mode:", analysis_mode, "\n\n")
+
 ## Set outcome type
 outcome_type <- "rate"
 
@@ -20,23 +25,32 @@ outcome_type <- "rate"
 ## Each value will produce a separate aggregated output file
 agg_duration_array <- c(2, 3, 4, 5, 6, 7, 14, 21, 25)
 
-## Define directory paths
+## Define directory paths (with analysis_mode subfolder for non-"all")
 models_dir <- here(path_onedrive, "03_modeling-and-results/01_modeling/")
 model_comparisons_dir <- paste0(path_onedrive, "03_modeling-and-results/02_best-model-selection/")
+if (analysis_mode != "all") {
+  model_comparisons_dir <- paste0(model_comparisons_dir, analysis_mode, "/")
+}
 
-## Create outputs directory
+## Create outputs directory (with analysis_mode subfolder for non-"all")
 outputs_dir <- paste0(path_onedrive, "03_modeling-and-results/03_bested-models/")
+if (analysis_mode != "all") {
+  outputs_dir <- paste0(outputs_dir, analysis_mode, "/")
+}
 
 ## Create configs directory
-configs_dir <- paste0(outputs_dir, "/configs/")
-dir.create(configs_dir, showWarnings = FALSE)
+configs_dir <- paste0(outputs_dir, "configs/")
+dir.create(configs_dir, showWarnings = FALSE, recursive = TRUE)
 
 ## Create plots directory
-plots_dir <- paste0(outputs_dir, "/plots/")
-dir.create(plots_dir, showWarnings = FALSE)
+plots_dir <- paste0(outputs_dir, "plots/")
+dir.create(plots_dir, showWarnings = FALSE, recursive = TRUE)
 
-## Create excess hospitalizations base directory
+## Create excess hospitalizations base directory (with analysis_mode subfolder for non-"all")
 tables_dir <- paste0(path_onedrive, "03_modeling-and-results/04_bested-results/")
+if (analysis_mode != "all") {
+  tables_dir <- paste0(tables_dir, analysis_mode, "/")
+}
 dir.create(tables_dir, recursive = TRUE, showWarnings = FALSE)
 
 ## Create daily subdirectory (one xlsx per exposure combination with all daily data)
@@ -53,8 +67,12 @@ dir.create(aggregated_dir, recursive = TRUE, showWarnings = FALSE)
 #-------------------------------
 cat("=== Step 1: Extract Final PDFs and Configs ===\n")
 
-## Read manual best model selection xlsx
-xlsx_file <- paste0(model_comparisons_dir, "model_versions_manual_for_final_outputs.xlsx")
+## Read manual best model selection xlsx (different file for different analysis modes)
+if (analysis_mode == "all") {
+  xlsx_file <- paste0(model_comparisons_dir, "model_versions_manual_for_final_outputs.xlsx")
+} else {
+  xlsx_file <- paste0(model_comparisons_dir, "model_versions_manual_for_final_outputs_", analysis_mode, ".xlsx")
+}
 
 if (!file.exists(xlsx_file)) {
   stop("XLSX file not found: ", xlsx_file, "\n",
@@ -99,6 +117,9 @@ for (dur in agg_duration_array) {
   all_aggregated_results[[paste0("days_", dur)]] <- list()
 }
 
+# Check if evac_type column exists (for evac_analysis mode)
+has_evac_type <- "evac_type" %in% colnames(best_models_manual)
+
 # Process each best model
 for (i in 1:nrow(best_models_manual)) {
   row <- best_models_manual[i, ]
@@ -107,8 +128,13 @@ for (i in 1:nrow(best_models_manual)) {
   cause <- row$cause
   source_dir <- row$source_dir
   version <- row$version
+  evac_type <- if (has_evac_type) row$evac_type else NA_character_
   
-  cat("Processing:", enc_type, "-", exposure_category, "-", cause, "\n")
+  if (has_evac_type && !is.na(evac_type)) {
+    cat("Processing:", enc_type, "-", exposure_category, "-", cause, "-", evac_type, "\n")
+  } else {
+    cat("Processing:", enc_type, "-", exposure_category, "-", cause, "\n")
+  }
   
   # Construct path to MBB results
   model_version_dir <- paste0(models_dir, source_dir, "/", version, "/")
@@ -159,8 +185,12 @@ for (i in 1:nrow(best_models_manual)) {
     
     cat("  Calculating excess hospitalizations...\n")
     
-    # Create combination key for storage
-    combo_key <- paste(enc_type, exposure_category, cause, sep = "_")
+    # Create combination key for storage (include evac_type if present)
+    if (has_evac_type && !is.na(evac_type)) {
+      combo_key <- paste(enc_type, exposure_category, cause, evac_type, sep = "_")
+    } else {
+      combo_key <- paste(enc_type, exposure_category, cause, sep = "_")
+    }
     
     # Calculate daily excess (all days, no aggregation)
     daily_results <- calc_excess_from_mbb(
@@ -186,6 +216,12 @@ for (i in 1:nrow(best_models_manual)) {
         source_dir = source_dir,
         version = version
       )
+    # Add evac_type column if in evac_analysis mode
+    if (has_evac_type && !is.na(evac_type)) {
+      daily_with_meta <- daily_with_meta %>%
+        mutate(evac_type = evac_type) %>%
+        select(evac_type, everything())
+    }
     all_daily_results[[combo_key]] <- daily_with_meta
     
     # Calculate aggregated results for each duration
@@ -208,6 +244,12 @@ for (i in 1:nrow(best_models_manual)) {
             source_dir = source_dir,
             version = version
           )
+        # Add evac_type column if in evac_analysis mode
+        if (has_evac_type && !is.na(evac_type)) {
+          period_with_meta <- period_with_meta %>%
+            mutate(evac_type = evac_type) %>%
+            select(evac_type, everything())
+        }
         dur_key <- paste0("days_", dur)
         all_aggregated_results[[dur_key]][[combo_key]] <- period_with_meta
       }
@@ -242,11 +284,18 @@ if (length(all_daily_results) > 0) {
       # Combine all combinations for this duration
       agg_df <- bind_rows(all_aggregated_results[[dur_key]])
       
-      # Select standard columns for output
-      agg_df <- agg_df %>%
-        select(enc_type, exposure_category, cause, period, 
-               observed, expected_CI, excess_CI, excess_pct_CI,
-               source_dir, version)
+      # Select standard columns for output (include evac_type if present)
+      if ("evac_type" %in% colnames(agg_df)) {
+        agg_df <- agg_df %>%
+          select(evac_type, enc_type, exposure_category, cause, period, 
+                 observed, expected_CI, excess_CI, excess_pct_CI,
+                 source_dir, version)
+      } else {
+        agg_df <- agg_df %>%
+          select(enc_type, exposure_category, cause, period, 
+                 observed, expected_CI, excess_CI, excess_pct_CI,
+                 source_dir, version)
+      }
       
       # Save to aggregated directory with suggestive filename
       agg_xlsx <- paste0(aggregated_dir, "excess_hosp_", dur, "days.xlsx")
@@ -261,9 +310,18 @@ if (length(all_daily_results) > 0) {
   default_dur_key <- paste0("days_", default_dur)
   
   if (length(all_aggregated_results[[default_dur_key]]) > 0) {
-    excess_summary <- bind_rows(all_aggregated_results[[default_dur_key]]) %>%
-      select(enc_type, exposure_category, cause, period, 
-             observed, expected_CI, excess_CI, excess_pct_CI)
+    excess_summary <- bind_rows(all_aggregated_results[[default_dur_key]])
+    
+    # Select columns (include evac_type if present)
+    if ("evac_type" %in% colnames(excess_summary)) {
+      excess_summary <- excess_summary %>%
+        select(evac_type, enc_type, exposure_category, cause, period, 
+               observed, expected_CI, excess_CI, excess_pct_CI)
+    } else {
+      excess_summary <- excess_summary %>%
+        select(enc_type, exposure_category, cause, period, 
+               observed, expected_CI, excess_CI, excess_pct_CI)
+    }
     
     gt_excess <- excess_summary %>%
       gt() %>%

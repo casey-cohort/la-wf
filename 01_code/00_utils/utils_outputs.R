@@ -613,8 +613,14 @@ identify_best_models <- function(combined_metrics, r2_threshold = 0, metric = "s
   # Get the metric column name
   metric_col <- if (metric == "sMAPE") "sMAPE" else "MASE"
   
+  # Determine grouping columns - add evac_type if it exists
+  group_cols <- c("enc_type", "exposure_category", "cause")
+  if ("evac_type" %in% names(combined_metrics)) {
+    group_cols <- c("evac_type", group_cols)
+  }
+  
   best_models <- combined_metrics %>%
-    group_by(enc_type, exposure_category, cause) %>%
+    group_by(across(all_of(group_cols))) %>%
     mutate(
       # Flag models with R2 above threshold
       has_r2_above_threshold = !is.na(R2) & R2 > r2_threshold,
@@ -673,6 +679,9 @@ extract_best_model_files <- function(best_models_df, models_dir, bested_dir, pdf
   config_failed <- 0
   files_replaced <- 0
   
+  # Check if evac_type column exists
+  has_evac_type <- "evac_type" %in% names(best_models_df)
+  
   # Process each best model
   for (i in 1:nrow(best_models_df)) {
     row <- best_models_df[i, ]
@@ -681,6 +690,7 @@ extract_best_model_files <- function(best_models_df, models_dir, bested_dir, pdf
     enc_type <- row$enc_type
     exposure_category <- row$exposure_category
     cause <- row$cause
+    evac_type <- if (has_evac_type) row$evac_type else NA_character_
     
     # Construct paths
     model_version_dir <- paste0(models_dir, source_dir, "/", version, "/")
@@ -688,18 +698,24 @@ extract_best_model_files <- function(best_models_df, models_dir, bested_dir, pdf
     # Extract mod_ver_suffix from version (remove "model_run_" prefix)
     mod_ver_suffix <- sub("^model_run_", "", version)
     
-    # Find PDF
-    pdf_source <- paste0(model_version_dir, "figures/model_fit_", enc_type, "_", exposure_category, "_", cause, ".pdf")
+    # Find PDF - source PDF has evac_type suffix if it's eaton/palisades model
+    if (has_evac_type && !is.na(evac_type)) {
+      pdf_source <- paste0(model_version_dir, "figures/model_fit_", enc_type, "_", exposure_category, "_", cause, "_", evac_type, ".pdf")
+    } else {
+      pdf_source <- paste0(model_version_dir, "figures/model_fit_", enc_type, "_", exposure_category, "_", cause, ".pdf")
+    }
     
     # Find config
     config_source <- paste0(model_version_dir, "model_config_", mod_ver_suffix, ".yaml")
     
-    # Create common filename prefix so PDF and YAML sort together
-    file_prefix <- paste0(enc_type, "_", exposure_category, "_", cause, "_", source_dir, "_", version)
-    
-    # Pattern to match any existing files for this model combination (regardless of version)
-    # This allows us to replace old versions with new best models
-    combination_pattern <- paste0("^", enc_type, "_", exposure_category, "_", cause, "_.*")
+    # Create common filename prefix - include evac_type if present
+    if (has_evac_type && !is.na(evac_type)) {
+      file_prefix <- paste0(enc_type, "_", exposure_category, "_", cause, "_", evac_type, "_", source_dir, "_", version)
+      combination_pattern <- paste0("^", enc_type, "_", exposure_category, "_", cause, "_", evac_type, "_.*")
+    } else {
+      file_prefix <- paste0(enc_type, "_", exposure_category, "_", cause, "_", source_dir, "_", version)
+      combination_pattern <- paste0("^", enc_type, "_", exposure_category, "_", cause, "_.*")
+    }
     
     # Remove existing files for this combination before adding new ones (only if multiple_versions = FALSE)
     # Check both directories if they're different

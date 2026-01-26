@@ -1,7 +1,11 @@
 seed: 112358
-user: 'akd'
+user: 'lbw'
 outcome_type: 'rate'
 # outcome_type:'num'
+
+# Analysis type: determines which exposure data to use
+# Options: "all" (evac + smoke categories), "palisades" (evac_palisades only), "eaton" (evac_eaton only)
+analysis_type: "palisades"
 
 # Specify which models to run using ONE of the following approaches:
 #
@@ -12,19 +16,19 @@ outcome_type: 'rate'
 # IMPORTANT: Use multi-line format for models_to_run_flat (as shown below).
 
 # OPTION 1: Uncomment to use cartesian product
-# models_to_run:
-#   encounter_type: ["ED"]
-#   exposure_category: ["evac"]
-#   cause: ["enc_resp", "enc_cardio", "enc_injury", "enc_neuro"]
+models_to_run:
+  encounter_type: ["ED", "IP"]
+  exposure_category: ["evac"]
+  cause: ["enc_cardio", "enc_resp", "enc_injury", "enc_neuro", "enc"]
 
 # OPTION 2: Currently active (comment out to use models_to_run instead)
-models_to_run_flat:
+# models_to_run_flat:
   # - encounter_type: "ED"
   #   exposure_category: "evac"
   #   cause: "enc_cardio"
-  - encounter_type: "ED"
-    exposure_category: "none"
-    cause: "enc_neuro"
+  # - encounter_type: "ED"
+  #   exposure_category: "none"
+  #   cause: "enc_neuro"
 
 grid_params:
   # XGBoost parameters - more conservative to reduce overfitting
@@ -74,10 +78,10 @@ train_test_params:
 # can give a list of combinations so we can try many things -- so maybe increments of 5 and all combos.
 
 # Grid size for hyperparameter tuning
-grid_size: 200
+grid_size: 100
 
 # Number of moving block bootstrap simulations for confidence intervals
-n_sim_mbb: 100
+n_sim_mbb: 1000
 
 # Block length (in days) for Moving Block Bootstrap
 block_length_mbb: 14
@@ -98,4 +102,4 @@ ci_params:
 cores_to_leave_out: 2
 
 # model description
-model_description: "Balanced hyperparameters"
+model_description: "changed trees range to 50-200 from 8-25"
