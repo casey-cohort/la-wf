@@ -30,13 +30,20 @@ config <- read_config(paste0(path_repo, "01_code/02_analysis/model_config.yaml")
 n_models <- length(config$models_to_run_flat)
 n_sim_mbb <- config$n_sim_mbb
 
+# get analysis_type from config (defaults to "all" if not specified)
+analysis_type <- config$analysis_type
+if (is.null(analysis_type) || analysis_type == "") {
+  analysis_type <- "all"
+}
+cat("Analysis type:", analysis_type, "\n")
+
 # determine version number, construct folder name, make folder, set suffix for model version
-# new format: model_run_YYYY-MM-DD.v###_x##_sim###
+# format: model_run_YYYY-MM-DD.v###_{analysis_type}_x##_sim###
 models_path <- get_models_path(path_onedrive, user = config$user)
 ver <- gen_ver_number(models_path)
-folder_name <- paste0("model_run_", Sys.Date(), ".", ver, "_x", n_models, "_sim", n_sim_mbb, "/")
+folder_name <- paste0("model_run_", Sys.Date(), ".", ver, "_", analysis_type, "_x", n_models, "_sim", n_sim_mbb, "/")
 dir.create(paste0(models_path, folder_name), showWarnings = FALSE, recursive = TRUE)
-mod_ver_suffix <- paste0(Sys.Date(), ".", ver, "_x", n_models, "_sim", n_sim_mbb)
+mod_ver_suffix <- paste0(Sys.Date(), ".", ver, "_", analysis_type, "_x", n_models, "_sim", n_sim_mbb)
 
 # write this ver of config back out
 write_config(config, paste0(models_path, folder_name, "model_config_", mod_ver_suffix, ".yaml"))
@@ -48,17 +55,23 @@ options(scipen = 999)
 # set global seed for arg to tuning function
 global_seed <- config$seed
 
-# train test data to use -- datasets are in dated folders
+# train test data to use -- datasets are in dated folders with analysis_type subdirectory
 # Check if TRAIN_TEST_DATE env var is set (from run_pipeline), otherwise prompt user
 train_test_date_env <- Sys.getenv("TRAIN_TEST_DATE", unset = "")
 if (train_test_date_env != "") {
-  train_test_path <- get_train_test_data_path(path_onedrive, prompt_user = FALSE, date = train_test_date_env)
+  train_test_path <- get_train_test_data_path(path_onedrive, prompt_user = FALSE, date = train_test_date_env, analysis_type = analysis_type)
 } else {
-  train_test_path <- get_train_test_data_path(path_onedrive, prompt_user = TRUE)
+  train_test_path <- get_train_test_data_path(path_onedrive, prompt_user = TRUE, analysis_type = analysis_type)
 }
 
-# Store train/test date in environment variable for use by subsequent pipeline steps
-train_test_date <- basename(train_test_path)
+# Store train/test date and analysis_type in environment variables for use by subsequent pipeline steps
+# Extract just the date portion (parent of analysis_type folder)
+train_test_date <- basename(dirname(train_test_path))
+if (train_test_date == "03_train_test") {
+  # Fallback for backwards compatibility (no analysis_type subdirectory)
+  train_test_date <- basename(train_test_path)
+}
+Sys.setenv(ANALYSIS_TYPE = analysis_type)
 Sys.setenv(TRAIN_TEST_DATE = train_test_date)
 
 #------------------------------

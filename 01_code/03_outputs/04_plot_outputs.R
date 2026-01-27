@@ -14,25 +14,57 @@
 if(!requireNamespace('pacman', quietly = TRUE)) install.packages('pacman') 
 pacman::p_load(readr, readxl, snakecase, lubridate, purrr,
                dplyr, tidyr, stringr, forcats, cowplot,
-               ggplot2, patchwork, gridExtra, ggtext, here)
+               ggplot2, patchwork, gridExtra, ggtext, here, yaml)
 
 # Set paths (centralized in repo)
 source(paste0(getwd(), "/01_code/paths.R"))
 
+# Get analysis_mode from environment (set by run_final_outputs) or fall back to config
+analysis_mode <- Sys.getenv("ANALYSIS_MODE", unset = "")
+if (analysis_mode == "") {
+  # Fall back to config file
+  config <- yaml::read_yaml(paste0(getwd(), "/01_code/02_analysis/model_config.yaml"))
+  analysis_mode <- config$analysis_type
+  if (is.null(analysis_mode) || analysis_mode == "") {
+    analysis_mode <- "all"
+  }
+}
+cat("Analysis mode:", analysis_mode, "\n")
+
+# Create display label for titles
+analysis_label <- switch(analysis_mode,
+  "all" = "All Exposures",
+  "palisades" = "Palisades Evacuation",
+  "eaton" = "Eaton Evacuation",
+  "evac_analysis" = "Evacuation Analysis",
+  tools::toTitleCase(analysis_mode)
+)
+cat("Analysis label for plots:", analysis_label, "\n")
+
 # =============================================================================
 # PARAMETERS
 # =============================================================================
-num_days <- 14                # number of days to plot (must match available aggregated file)
-include_no_exposure <- FALSE  # TRUE for supplement, FALSE for main manuscript
-aggregate_to_weekly <- TRUE   # if TRUE, aggregate daily results into 7-day bins for plotting
+# Read from environment if set (by run_final_outputs), otherwise use defaults
+num_days_env <- Sys.getenv("PLOT_NUM_DAYS", unset = "")
+num_days <- if (num_days_env != "") as.integer(num_days_env) else 7
+
+include_no_exposure_env <- Sys.getenv("PLOT_INCLUDE_NO_EXPOSURE", unset = "")
+include_no_exposure <- if (include_no_exposure_env != "") as.logical(include_no_exposure_env) else FALSE
+
+aggregate_to_weekly <- FALSE   # if TRUE, aggregate daily results into 7-day bins for plotting
 weekly_x_labels <- "week"     # "week" (Week 1/2/3...) or "range" (YYYY-MM-DD - YYYY-MM-DD); only used when aggregate_to_weekly = TRUE
 
-# paths
+# paths (with analysis_mode subfolder for non-"all")
 tables_dir <- paste0(path_onedrive, "03_modeling-and-results/04_bested-results/")
+if (analysis_mode != "all") {
+  tables_dir <- paste0(tables_dir, analysis_mode, "/")
+}
 rootdir_daily <- paste0(tables_dir, "daily/")          # folder containing the daily xlsx files
 rootdir_aggregated <- paste0(tables_dir, "aggregated/") # folder containing the aggregated xlsx files
 output_dir <- paste0(tables_dir, "plots/")             # where to save plots
 dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
+
+cat("Reading from:", tables_dir, "\n")
 
 # =============================================================================
 # READ DATA
@@ -219,31 +251,79 @@ if (aggregate_to_weekly) {
 # COLOR PALETTE AND LABELS
 # =============================================================================
 
-# define colors and labels based on whether we include no exposure
-if (include_no_exposure) {
-  exposure_colors <- c(
-    "none" = "#a6cee3",      # light blue
-    "mid_smoke" = "#f2c88f", # light orange  
-    "high_smoke" = "#d37750", # darker orange
-    "evac" = "#7f0000"       # dark red
-  )
-  exposure_labels <- c(
-    "none" = "No exposure",
-    "mid_smoke" = "Moderate smoke",
-    "high_smoke" = "High smoke",
-    "evac" = "Evacuation zone"
-  )
+# For evac_analysis mode, use evac_type (eaton/palisades) as the exposure grouping
+if (analysis_mode == "evac_analysis") {
+  # Check if evac_type column exists
+  if ("evac_type" %in% names(results)) {
+    # Replace exposure with evac_type for evac rows, keep "none" as is
+    # Filter out any rows where evac_type is NA (except for "none" exposure)
+    results <- results %>%
+      filter(exposure == "none" | !is.na(evac_type)) %>%
+      mutate(exposure = ifelse(!is.na(evac_type) & exposure == "evac", evac_type, exposure))
+    cumulative_results <- cumulative_results %>%
+      filter(exposure == "none" | !is.na(evac_type)) %>%
+      mutate(exposure = ifelse(!is.na(evac_type) & exposure == "evac", evac_type, exposure))
+  }
+  
+  # Remove any remaining NA exposures
+  results <- results %>% filter(!is.na(exposure))
+  cumulative_results <- cumulative_results %>% filter(!is.na(exposure))
+  
+  # Define colors for evac_analysis (none + eaton + palisades)
+  if (include_no_exposure) {
+    exposure_colors <- c(
+      "none" = "#a6cee3",       # light blue (same as other plots)
+      "eaton" = "#7f0000",      # dark red (evac color)
+      "palisades" = "#d98888"   # lighter red/salmon
+    )
+    exposure_labels <- c(
+      "none" = "None",
+      "eaton" = "Eaton Evacuation",
+      "palisades" = "Palisades Evacuation"
+    )
+  } else {
+    exposure_colors <- c(
+      "eaton" = "#7f0000",      # dark red (evac color)
+      "palisades" = "#d98888"   # lighter red/salmon
+    )
+    exposure_labels <- c(
+      "eaton" = "Eaton Evacuation",
+      "palisades" = "Palisades Evacuation"
+    )
+  }
+  
+  # Update factor levels for proper ordering
+  exposure_order <- if (include_no_exposure) c("none", "eaton", "palisades") else c("eaton", "palisades")
+  results$exposure <- factor(results$exposure, levels = exposure_order)
+  cumulative_results$exposure <- factor(cumulative_results$exposure, levels = exposure_order)
+  
 } else {
-  exposure_colors <- c(
-    "mid_smoke" = "#f2c88f", # light orange  
-    "high_smoke" = "#d37750", # darker orange
-    "evac" = "#7f0000"       # dark red
-  )
-  exposure_labels <- c(
-    "mid_smoke" = "Moderate smoke",
-    "high_smoke" = "High smoke",
-    "evac" = "Evacuation zone"
-  )
+  # Standard colors for "all" analysis mode
+  if (include_no_exposure) {
+    exposure_colors <- c(
+      "none" = "#a6cee3",      # light blue
+      "mid_smoke" = "#f2c88f", # light orange  
+      "high_smoke" = "#d37750", # darker orange
+      "evac" = "#7f0000"       # dark red
+    )
+    exposure_labels <- c(
+      "none" = "None",
+      "mid_smoke" = "Moderate smoke",
+      "high_smoke" = "High smoke",
+      "evac" = "Evacuation zone"
+    )
+  } else {
+    exposure_colors <- c(
+      "mid_smoke" = "#f2c88f", # light orange  
+      "high_smoke" = "#d37750", # darker orange
+      "evac" = "#7f0000"       # dark red
+    )
+    exposure_labels <- c(
+      "mid_smoke" = "Moderate smoke",
+      "high_smoke" = "High smoke",
+      "evac" = "Evacuation zone"
+    )
+  }
 }
 
 # =============================================================================
@@ -426,8 +506,9 @@ pct_ip_neuro_cum <- plot_cumulative(cumulative_results, "IP", "Neuropsychiatric"
 n_days <- n_distinct(results$date)
 plot_width <- max(24, n_days * 1.5 + 8)  # extra width for cumulative plots
 
-# create filename suffix based on whether no exposure is included
+# create filename suffix based on analysis type and whether no exposure is included
 exposure_suffix <- if (include_no_exposure) "_with_none" else "_no_none"
+analysis_suffix <- paste0("_", analysis_mode)
 
 # build week-definitions caption for plots (only used in weekly mode with "week" labels)
 week_caption <- ""
@@ -446,11 +527,12 @@ ip_cum <- (ip_enc_cum / ip_cardio_cum / ip_injury_cum / ip_neuro_cum / ip_resp_c
 
 full_excess <- (ed_excess | ed_cum | ip_excess | ip_cum) +
   plot_layout(guides = "collect", widths = c(4, 1, 4, 1)) +
-  plot_annotation(caption = week_caption) &
+  plot_annotation(title = analysis_label, caption = week_caption) &
   theme(legend.position = "bottom",
+        plot.title = element_text(hjust = 0.5, size = 28, face = "bold"),
         plot.caption = element_text(hjust = 0.5, size = 14))
 
-png(paste0(output_dir, "full_excess_", num_days, "days", exposure_suffix, ".png"), 
+png(paste0(output_dir, "full_excess_", num_days, "days", analysis_suffix, exposure_suffix, ".png"), 
     width = plot_width, height = 22, units = "in", res = 300)
 print(full_excess)
 dev.off()
@@ -463,18 +545,19 @@ ip_pct_cum <- (pct_ip_enc_cum / pct_ip_cardio_cum / pct_ip_injury_cum / pct_ip_n
 
 full_pct_excess <- (ed_pct_excess | ed_pct_cum | ip_pct_excess | ip_pct_cum) +
   plot_layout(guides = "collect", widths = c(4, 1, 4, 1)) +
-  plot_annotation(caption = week_caption) &
+  plot_annotation(title = analysis_label, caption = week_caption) &
   theme(legend.position = "bottom",
+        plot.title = element_text(hjust = 0.5, size = 28, face = "bold"),
         plot.caption = element_text(hjust = 0.5, size = 14))
 
-png(paste0(output_dir, "full_pct_excess_", num_days, "days", exposure_suffix, ".png"), 
+png(paste0(output_dir, "full_pct_excess_", num_days, "days", analysis_suffix, exposure_suffix, ".png"), 
     width = plot_width, height = 22, units = "in", res = 300)
 print(full_pct_excess)
 dev.off()
 
 message("Plots saved to: ", output_dir)
-message("  - full_excess_", num_days, "days", exposure_suffix, ".png")
-message("  - full_pct_excess_", num_days, "days", exposure_suffix, ".png")
+message("  - full_excess_", num_days, "days", analysis_suffix, exposure_suffix, ".png")
+message("  - full_pct_excess_", num_days, "days", analysis_suffix, exposure_suffix, ".png")
 
 if (aggregate_to_weekly && identical(weekly_x_labels, "week") && exists("week_map")) {
   message("Weekly bins used (for reference):")

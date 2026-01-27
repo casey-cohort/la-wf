@@ -8,13 +8,32 @@ cat("STARTING 05_model_outputs.R\n")
 cat("========================================\n\n")
 
 # Setup ----
-pacman::p_load(tidyverse, ggplot2, patchwork, yardstick, gt, here, Metrics)
+pacman::p_load(tidyverse, ggplot2, patchwork, yardstick, gt, here, Metrics, yaml)
 
 # Set paths and source utilities
 source(paste0(getwd(), "/01_code/paths.R"))
 source(paste0(getwd(), "/01_code/00_utils/utils_general.R"))
 source(paste0(getwd(), "/01_code/00_utils/utils_tuning.R"))
 source(paste0(getwd(), "/01_code/00_utils/utils_outputs.R"))
+
+# Get analysis_type from environment (set by pipeline) or config
+analysis_type <- Sys.getenv("ANALYSIS_TYPE", unset = "")
+if (analysis_type == "") {
+  config <- yaml::read_yaml(paste0(getwd(), "/01_code/02_analysis/model_config.yaml"))
+  analysis_type <- config$analysis_type
+  if (is.null(analysis_type) || analysis_type == "") {
+    analysis_type <- "all"
+  }
+}
+cat("Analysis type:", analysis_type, "\n")
+
+# Create display label for titles
+analysis_label <- switch(analysis_type,
+  "all" = "",
+  "palisades" = "Palisades",
+  "eaton" = "Eaton",
+  tools::toTitleCase(analysis_type)
+)
 
 # Validation function for metrics calculation ----
 #' Validate data has sufficient observations for metrics
@@ -277,20 +296,26 @@ for (enc in names(mbb_results)) {
           
           p3 <- create_fit_plot(df_holdout_vis, "C) Holdout (post Jan 7, 2025 with MBB CIs)")
           
+          # Build title with analysis_type if not "all"
+          title_prefix <- if (analysis_label != "") paste0(analysis_label, " - ") else ""
+          
           # Combine all three plots
           p_combined <- (p1 / p2 / p3) +
             plot_annotation(
-              title = paste0("Prophet + XGBoost: ", enc, " - ", exposure, " - ", cause),
+              title = paste0(title_prefix, "Prophet + XGBoost: ", enc, " - ", exposure, " - ", cause),
               subtitle = paste0("Block length = ", result$L_block, " days, n_sim = ", result$n_sim, 
                                ", MAPE = ", round(test_metrics$mape, 2), 
                                ", MASE = ", round(test_metrics$mase, 2),
                                ", R² = ", test_metrics$r2)
             )
         } else {
+          # Build title with analysis_type if not "all"
+          title_prefix <- if (analysis_label != "") paste0(analysis_label, " - ") else ""
+          
           # Only train and test
           p_combined <- (p1 / p2) +
             plot_annotation(
-              title = paste0("Prophet + XGBoost: ", enc, " - ", exposure, " - ", cause),
+              title = paste0(title_prefix, "Prophet + XGBoost: ", enc, " - ", exposure, " - ", cause),
               subtitle = paste0("Block length = ", result$L_block, " days, n_sim = ", result$n_sim, 
                                ", MAPE = ", round(test_metrics$mape, 2), 
                                ", MASE = ", round(test_metrics$mase, 2),
@@ -298,8 +323,9 @@ for (enc in names(mbb_results)) {
             )
         }
         
-        # Save plot
-        plot_file <- paste0(figures_dir, "model_fit_", enc, "_", exposure, "_", cause, ".pdf")
+        # Save plot with analysis_type in filename
+        analysis_suffix <- if (analysis_type != "all") paste0("_", analysis_type) else ""
+        plot_file <- paste0(figures_dir, "model_fit_", enc, "_", exposure, "_", cause, analysis_suffix, ".pdf")
         cat("  Saving plot to:", plot_file, "\n")
         
         tryCatch({

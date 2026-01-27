@@ -146,8 +146,10 @@ gen_ver_number <- function(path) {
   today <- Sys.Date()
   
   # filter for folders that match the pattern with today's date
-  # Pattern matches: model_run_2025-10-22.v001_x20_sim1000
-  pattern <- paste0("^model_run_", today, "\\.v\\d{3}_x\\d+_sim\\d+$")
+  # Pattern matches both formats:
+  #   Old: model_run_2025-10-22.v001_x20_sim1000
+  #   New: model_run_2025-10-22.v001_palisades_x20_sim1000
+  pattern <- paste0("^model_run_", today, "\\.v\\d{3}(_[a-z]+)?_x\\d+_sim\\d+$")
   existing_folders <- all_dirs[grepl(pattern, all_dirs)]
   
   if (length(existing_folders) == 0) {
@@ -396,22 +398,34 @@ get_models_path <- function(path_onedrive, user = NULL) {
 #' Find latest model output directory
 #'
 #' Searches for model output directories matching the naming pattern:
-#' model_run_YYYY-MM-DD.v###_x##_sim###
-#' and returns the most recent one (sorted by directory name)
+#' model_run_YYYY-MM-DD.v###_{analysis_type}_x##_sim###
+#' and returns the most recent one (sorted by directory name).
+#' Optionally filter by analysis_type.
 #'
 #' @param output_path Path to directory containing model output folders
+#' @param analysis_type Optional filter for specific analysis type ("all", "palisades", "eaton")
 #'
 #' @return Full path to the latest model output directory, or NULL if none found
 #'
 #' @examples
 #' models_path <- get_models_path(path_onedrive, user = "lbw")
 #' latest_dir <- find_latest_version(models_path)
+#' latest_dir <- find_latest_version(models_path, analysis_type = "palisades")
 #'
-find_latest_version <- function(output_path) {
+find_latest_version <- function(output_path, analysis_type = NULL) {
   output_dirs <- list.dirs(output_path, full.names = TRUE, recursive = FALSE)
-  # Filter by new pattern
-  pattern <- "^model_run_\\d{4}-\\d{2}-\\d{2}\\.v\\d{3}_x\\d+_sim\\d+$"
+  # Pattern supports both old format (no analysis_type) and new format (with analysis_type)
+  # Old: model_run_YYYY-MM-DD.v###_x##_sim###
+  # New: model_run_YYYY-MM-DD.v###_{analysis_type}_x##_sim###
+  pattern <- "^model_run_\\d{4}-\\d{2}-\\d{2}\\.v\\d{3}(_[a-z]+)?_x\\d+_sim\\d+$"
   output_dirs <- output_dirs[grepl(pattern, basename(output_dirs))]
+  
+  # Filter by analysis_type if specified
+if (!is.null(analysis_type) && analysis_type != "") {
+    type_pattern <- paste0("_", analysis_type, "_x")
+    output_dirs <- output_dirs[grepl(type_pattern, basename(output_dirs))]
+  }
+  
   if (length(output_dirs) == 0) {
     return(NULL)
   }
@@ -428,13 +442,15 @@ find_latest_version <- function(output_path) {
 #' @param path_onedrive Path to OneDrive directory
 #' @param required If TRUE, stops with error if no directory found. If FALSE, returns NULL.
 #' @param user User name from config (defaults to reading from config or "default")
+#' @param analysis_type Optional filter for specific analysis type ("all", "palisades", "eaton")
 #'
 #' @return Full path to output directory, or NULL if not found and required=FALSE
 #'
 #' @examples
 #' latest_dir <- get_output_directory(path_onedrive)
+#' latest_dir <- get_output_directory(path_onedrive, analysis_type = "palisades")
 #'
-get_output_directory <- function(path_onedrive, required = TRUE, user = NULL) {
+get_output_directory <- function(path_onedrive, required = TRUE, user = NULL, analysis_type = NULL) {
   output_dir_env <- Sys.getenv("MODEL_OUTPUT_DIR", unset = "")
   cat("MODEL_OUTPUT_DIR environment variable:", ifelse(output_dir_env == "", "(not set)", output_dir_env), "\n")
   
@@ -444,10 +460,12 @@ get_output_directory <- function(path_onedrive, required = TRUE, user = NULL) {
   } else {
     cat("MODEL_OUTPUT_DIR not set or directory doesn't exist, falling back to find_latest_version()\n")
     models_path <- get_models_path(path_onedrive, user)
-    latest_dir <- find_latest_version(models_path)
+    latest_dir <- find_latest_version(models_path, analysis_type = analysis_type)
     
     if (is.null(latest_dir) && required) {
-      stop("No model output directories found. Please run 02_model_tune_phxgb_parallel.R first.")
+      stop("No model output directories found", 
+           ifelse(!is.null(analysis_type), paste0(" for analysis_type '", analysis_type, "'"), ""),
+           ". Please run 02_model_tune_phxgb_parallel.R first.")
     }
     
     if (!is.null(latest_dir)) {
@@ -521,23 +539,31 @@ create_output_subdirectories <- function(base_dir, subdirs = c("figures", "table
 #' @param path_onedrive Path to OneDrive directory
 #' @param prompt_user If TRUE, prompts user to select version (REQUIRED). If FALSE, must provide date parameter.
 #' @param date Optional specific date to use (format: "YYYY-MM-DD")
+#' @param analysis_type Optional analysis type subfolder ("all", "palisades", "eaton"). 
+#'        If NULL, uses root date folder (backwards compatible).
 #'
 #' @return Full path to train/test data directory
 #'
 #' @examples
 #' train_test_path <- get_train_test_data_path(path_onedrive, prompt_user = TRUE)
 #' train_test_path <- get_train_test_data_path(path_onedrive, prompt_user = FALSE, date = "2024-11-29")
+#' train_test_path <- get_train_test_data_path(path_onedrive, prompt_user = FALSE, date = "2024-11-29", analysis_type = "palisades")
 #'
-get_train_test_data_path <- function(path_onedrive, prompt_user = TRUE, date = NULL) {
-  base_path <- paste0(path_onedrive, "01_data/02_processed/train_test/")
+get_train_test_data_path <- function(path_onedrive, prompt_user = TRUE, date = NULL, analysis_type = NULL) {
+  base_path <- paste0(path_onedrive, "01_data/02_processed/03_train_test/")
   
   # Use specified date if provided
   if (!is.null(date)) {
-    data_path <- paste0(base_path, date, "/")
+    # Add analysis_type subdirectory if specified
+    if (!is.null(analysis_type) && analysis_type != "") {
+      data_path <- paste0(base_path, date, "/", analysis_type, "/")
+    } else {
+      data_path <- paste0(base_path, date, "/")
+    }
     if (!dir.exists(data_path)) {
       stop("Specified train/test data directory does not exist: ", data_path)
     }
-    cat("Using train/test data from:", date, "\n")
+    cat("Using train/test data from:", date, ifelse(!is.null(analysis_type), paste0(" (", analysis_type, ")"), ""), "\n")
     return(data_path)
   }
   
