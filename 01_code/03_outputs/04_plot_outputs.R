@@ -53,6 +53,7 @@ include_no_exposure <- if (include_no_exposure_env != "") as.logical(include_no_
 
 aggregate_to_weekly <- FALSE   # if TRUE, aggregate daily results into 7-day bins for plotting
 weekly_x_labels <- "week"     # "week" (Week 1/2/3...) or "range" (YYYY-MM-DD - YYYY-MM-DD); only used when aggregate_to_weekly = TRUE
+cumulative_only <- TRUE       # if TRUE, also generate cumulative-only plots (for main manuscript)
 
 # paths (with analysis_mode subfolder for non-"all")
 tables_dir <- paste0(path_onedrive, "03_modeling-and-results/04_bested-results/")
@@ -278,8 +279,8 @@ if (analysis_mode == "evac_analysis") {
     )
     exposure_labels <- c(
       "none" = "None",
-      "eaton" = "Eaton Evacuation",
-      "palisades" = "Palisades Evacuation"
+      "eaton" = "Eaton",
+      "palisades" = "Palisades"
     )
   } else {
     exposure_colors <- c(
@@ -287,8 +288,8 @@ if (analysis_mode == "evac_analysis") {
       "palisades" = "#d98888"   # lighter red/salmon
     )
     exposure_labels <- c(
-      "eaton" = "Eaton Evacuation",
-      "palisades" = "Palisades Evacuation"
+      "eaton" = "Eaton",
+      "palisades" = "Palisades"
     )
   }
   
@@ -401,14 +402,31 @@ plot_estimates <- function(data, visit, encounter, prefix) {
 }
 
 # cumulative plotting function ---------------------------
-plot_cumulative <- function(data, visit, encounter, prefix) {
+plot_cumulative <- function(data, visit, encounter, prefix, for_cumulative_only = FALSE) {
   
-  # plot title - only for Total encounter
-  if(encounter == "Total") {
-    plot_title <- "Cumulative"
+  # plot title - for cumulative-only plots, show visit type; for full plots, show "Cumulative"
+  if (for_cumulative_only) {
+    # For cumulative-only layout: show ED/IP label for Total row only
+    if (encounter == "Total") {
+      plot_title <- if (visit == "ED") "Emergency Department" else "Inpatient"
+    } else {
+      plot_title <- ""
+    }
   } else {
-    plot_title <- ""
+    # For full layout: just show "Cumulative" for Total row
+    if (encounter == "Total") {
+      plot_title <- "Cumulative"
+    } else {
+      plot_title <- ""
+    }
   }
+  
+  # y-axis label - show encounter type on left side
+  y_axis_label <- if (for_cumulative_only) encounter else ""
+  
+  # Styling adjustments for cumulative-only plots
+  base_font_size <- if (for_cumulative_only) 18 else 22
+  title_size <- if (for_cumulative_only) 20 else 26
   
   # filter data
   plot_data <- data %>% 
@@ -427,8 +445,8 @@ plot_cumulative <- function(data, visit, encounter, prefix) {
                        labels = exposure_labels,
                        name = "Exposure group") + 
     geom_hline(yintercept = 0, linetype = "dashed", color = "black") +
-    theme_minimal(base_size = 22) +
-    theme(plot.title = element_text(hjust = 0.5, size = 26, face = "bold"),
+    theme_minimal(base_size = base_font_size) +
+    theme(plot.title = element_text(hjust = 0.5, size = title_size, face = "bold"),
           axis.text.x = element_text(angle = 90, vjust = 0.5),
           panel.grid.major.x = element_blank(),
           panel.grid.minor.x = element_blank(),
@@ -437,7 +455,7 @@ plot_cumulative <- function(data, visit, encounter, prefix) {
           axis.line = element_line(color = "darkgrey", linewidth = 0.5),
           legend.position = "none") +
     scale_x_discrete(labels = exposure_labels) +
-    labs(x = NULL, y = NULL, title = plot_title)
+    labs(x = NULL, y = y_axis_label, title = plot_title)
   
   return(cum_plot)
 }
@@ -527,13 +545,12 @@ ip_cum <- (ip_enc_cum / ip_cardio_cum / ip_injury_cum / ip_neuro_cum / ip_resp_c
 
 full_excess <- (ed_excess | ed_cum | ip_excess | ip_cum) +
   plot_layout(guides = "collect", widths = c(4, 1, 4, 1)) +
-  plot_annotation(title = analysis_label, caption = week_caption) &
+  plot_annotation(caption = week_caption) &
   theme(legend.position = "bottom",
-        plot.title = element_text(hjust = 0.5, size = 28, face = "bold"),
         plot.caption = element_text(hjust = 0.5, size = 14))
 
-png(paste0(output_dir, "full_excess_", num_days, "days", analysis_suffix, exposure_suffix, ".png"), 
-    width = plot_width, height = 22, units = "in", res = 300)
+pdf(paste0(output_dir, "full_excess_", num_days, "days", analysis_suffix, exposure_suffix, ".pdf"), 
+    width = plot_width, height = 22)
 print(full_excess)
 dev.off()
 
@@ -545,19 +562,93 @@ ip_pct_cum <- (pct_ip_enc_cum / pct_ip_cardio_cum / pct_ip_injury_cum / pct_ip_n
 
 full_pct_excess <- (ed_pct_excess | ed_pct_cum | ip_pct_excess | ip_pct_cum) +
   plot_layout(guides = "collect", widths = c(4, 1, 4, 1)) +
-  plot_annotation(title = analysis_label, caption = week_caption) &
+  plot_annotation(caption = week_caption) &
   theme(legend.position = "bottom",
-        plot.title = element_text(hjust = 0.5, size = 28, face = "bold"),
         plot.caption = element_text(hjust = 0.5, size = 14))
 
-png(paste0(output_dir, "full_pct_excess_", num_days, "days", analysis_suffix, exposure_suffix, ".png"), 
-    width = plot_width, height = 22, units = "in", res = 300)
+pdf(paste0(output_dir, "full_pct_excess_", num_days, "days", analysis_suffix, exposure_suffix, ".pdf"), 
+    width = plot_width, height = 22)
 print(full_pct_excess)
 dev.off()
 
 message("Plots saved to: ", output_dir)
-message("  - full_excess_", num_days, "days", analysis_suffix, exposure_suffix, ".png")
-message("  - full_pct_excess_", num_days, "days", analysis_suffix, exposure_suffix, ".png")
+message("  - full_excess_", num_days, "days", analysis_suffix, exposure_suffix, ".pdf")
+message("  - full_pct_excess_", num_days, "days", analysis_suffix, exposure_suffix, ".pdf")
+
+# =============================================================================
+# CUMULATIVE-ONLY PLOTS (for main manuscript)
+# =============================================================================
+
+if (cumulative_only) {
+  
+  # Create cumulative plots specifically for standalone layout (with ED/IP titles and outcome labels)
+  # excess raw - cumulative only
+  ed_enc_cum_solo <- plot_cumulative(cumulative_results, "ED", "Total", "excess", for_cumulative_only = TRUE)
+  ed_cardio_cum_solo <- plot_cumulative(cumulative_results, "ED", "Cardiovascular", "excess", for_cumulative_only = TRUE)
+  ed_injury_cum_solo <- plot_cumulative(cumulative_results, "ED", "Injury", "excess", for_cumulative_only = TRUE)
+  ed_resp_cum_solo <- plot_cumulative(cumulative_results, "ED", "Respiratory", "excess", for_cumulative_only = TRUE)
+  ed_neuro_cum_solo <- plot_cumulative(cumulative_results, "ED", "Neuropsychiatric", "excess", for_cumulative_only = TRUE)
+  
+  ip_enc_cum_solo <- plot_cumulative(cumulative_results, "IP", "Total", "excess", for_cumulative_only = TRUE)
+  ip_cardio_cum_solo <- plot_cumulative(cumulative_results, "IP", "Cardiovascular", "excess", for_cumulative_only = TRUE)
+  ip_injury_cum_solo <- plot_cumulative(cumulative_results, "IP", "Injury", "excess", for_cumulative_only = TRUE)
+  ip_resp_cum_solo <- plot_cumulative(cumulative_results, "IP", "Respiratory", "excess", for_cumulative_only = TRUE)
+  ip_neuro_cum_solo <- plot_cumulative(cumulative_results, "IP", "Neuropsychiatric", "excess", for_cumulative_only = TRUE)
+  
+  # excess percent - cumulative only
+  pct_ed_enc_cum_solo <- plot_cumulative(cumulative_results, "ED", "Total", "excess_pct", for_cumulative_only = TRUE)
+  pct_ed_cardio_cum_solo <- plot_cumulative(cumulative_results, "ED", "Cardiovascular", "excess_pct", for_cumulative_only = TRUE)
+  pct_ed_injury_cum_solo <- plot_cumulative(cumulative_results, "ED", "Injury", "excess_pct", for_cumulative_only = TRUE)
+  pct_ed_resp_cum_solo <- plot_cumulative(cumulative_results, "ED", "Respiratory", "excess_pct", for_cumulative_only = TRUE)
+  pct_ed_neuro_cum_solo <- plot_cumulative(cumulative_results, "ED", "Neuropsychiatric", "excess_pct", for_cumulative_only = TRUE)
+  
+  pct_ip_enc_cum_solo <- plot_cumulative(cumulative_results, "IP", "Total", "excess_pct", for_cumulative_only = TRUE)
+  pct_ip_cardio_cum_solo <- plot_cumulative(cumulative_results, "IP", "Cardiovascular", "excess_pct", for_cumulative_only = TRUE)
+  pct_ip_injury_cum_solo <- plot_cumulative(cumulative_results, "IP", "Injury", "excess_pct", for_cumulative_only = TRUE)
+  pct_ip_resp_cum_solo <- plot_cumulative(cumulative_results, "IP", "Respiratory", "excess_pct", for_cumulative_only = TRUE)
+  pct_ip_neuro_cum_solo <- plot_cumulative(cumulative_results, "IP", "Neuropsychiatric", "excess_pct", for_cumulative_only = TRUE)
+  
+  ## excess raw - cumulative only assembly ---------------------------
+  ed_cum_solo <- (ed_enc_cum_solo / ed_cardio_cum_solo / ed_injury_cum_solo / ed_neuro_cum_solo / ed_resp_cum_solo)
+  ip_cum_solo <- (ip_enc_cum_solo / ip_cardio_cum_solo / ip_injury_cum_solo / ip_neuro_cum_solo / ip_resp_cum_solo)
+  
+  cumulative_excess <- (ed_cum_solo | ip_cum_solo) +
+    plot_layout(guides = "collect") &
+    theme(legend.position = "bottom",
+          axis.text.x = element_text(angle = 60, hjust = 1, vjust = 1, size = 14),
+          axis.text.y = element_text(size = 14),
+          axis.title.y = element_text(size = 16),
+          legend.text = element_text(size = 14),
+          legend.title = element_text(size = 16),
+          plot.margin = margin(t = 5, r = 10, b = 5, l = 5))
+  
+  pdf(paste0(output_dir, "cumulative_excess_", num_days, "days", analysis_suffix, exposure_suffix, ".pdf"), 
+      width = 9, height = 16)
+  print(cumulative_excess)
+  dev.off()
+  
+  ## excess percent - cumulative only assembly ---------------------------
+  ed_pct_cum_solo <- (pct_ed_enc_cum_solo / pct_ed_cardio_cum_solo / pct_ed_injury_cum_solo / pct_ed_neuro_cum_solo / pct_ed_resp_cum_solo)
+  ip_pct_cum_solo <- (pct_ip_enc_cum_solo / pct_ip_cardio_cum_solo / pct_ip_injury_cum_solo / pct_ip_neuro_cum_solo / pct_ip_resp_cum_solo)
+  
+  cumulative_pct_excess <- (ed_pct_cum_solo | ip_pct_cum_solo) +
+    plot_layout(guides = "collect") &
+    theme(legend.position = "bottom",
+          axis.text.x = element_text(angle = 60, hjust = 1, vjust = 1, size = 14),
+          axis.text.y = element_text(size = 14),
+          axis.title.y = element_text(size = 16),
+          legend.text = element_text(size = 14),
+          legend.title = element_text(size = 16),
+          plot.margin = margin(t = 5, r = 10, b = 5, l = 5))
+  
+  pdf(paste0(output_dir, "cumulative_pct_excess_", num_days, "days", analysis_suffix, exposure_suffix, ".pdf"), 
+      width = 9, height = 16)
+  print(cumulative_pct_excess)
+  dev.off()
+  
+  message("  - cumulative_excess_", num_days, "days", analysis_suffix, exposure_suffix, ".pdf")
+  message("  - cumulative_pct_excess_", num_days, "days", analysis_suffix, exposure_suffix, ".pdf")
+}
 
 if (aggregate_to_weekly && identical(weekly_x_labels, "week") && exists("week_map")) {
   message("Weekly bins used (for reference):")
