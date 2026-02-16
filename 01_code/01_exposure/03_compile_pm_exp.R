@@ -8,7 +8,7 @@
 #-------------------------------
 # load packages
 library(pacman)
-p_load(dplyr, ggplot2, purrr, sf, readr, tigris, terra)
+p_load(dplyr, ggplot2, purrr, sf, readr, tigris, terra, arrow)
 
 #-------------------------------
 # set up paths and parameters
@@ -46,15 +46,14 @@ counties_map <- data.frame(
             'Orange', 'San Diego', 'Imperial', 'Riverside', 'San Bernardino')
 )
 
+# paths 
+source(paste0(getwd(), "/01_code/paths.R"))
+
 # in directory
-wd_path = "/Users/laurenwilner/Desktop/Desktop/epidemiology_PhD/00_repos/la-wf/01_data/01_raw"
+wd_path = paste0(path_onedrive, "01_data/01_raw")
 
 # out directory
-out_path = "/Users/laurenwilner/Desktop/Desktop/epidemiology_PhD/00_repos/la-wf/01_data/02_clean"
-
-# data directory
-data_path = "/Users/laurenwilner/Desktop/Desktop/epidemiology_PhD/01_data"
-
+out_path = paste0(path_onedrive, "01_data/02_processed/01_exposure/")
 
 #----------------------------------
 # helper functions
@@ -123,7 +122,7 @@ calculate_pop_weighted_centroid <- function(tract_geom, pop_raster) {
 
 ### load demographic and boundary datasets 
 # load counties 
-counties <- st_read(paste0(data_path, '/clean/us_cnty_boundaries.geojson'))
+counties <- st_read(paste0(path_data, '/clean/us_cnty_boundaries.geojson'))
 # pull of counties to keep
 county_fips_to_keep <- counties_map$fips
 # strip the '06' from the fips codes to match the counties dataset
@@ -425,6 +424,36 @@ pm_exp <- exposure_df_corrected %>%
 write.csv(pm_exp, 
           file = file.path(out_path, "exposed_cts_pm.csv"), 
           row.names = FALSE)
+
+# Save intermediate files for Figure 1 (smoke exposure map with trajectories)
+# Using GeoJSON for R/Python compatibility (human-readable)
+
+# Create intermediate directory if it doesn't exist
+dir.create(file.path(out_path, "intermediate"), showWarnings = FALSE, recursive = TRUE)
+
+# Save smoke exposure census tracts with geometry
+smoke_cts_out <- exposure_df_corrected %>%
+  select(GEOID10, smoke_category) %>%
+  rename(geoid = GEOID10)
+st_write(smoke_cts_out, 
+         file.path(out_path, "intermediate/smoke_exposure_cts.geojson"),
+         delete_dsn = TRUE)
+
+# Save trajectory lines (filter out invalid lines with < 2 points)
+valid_traj_lines <- keep_traj_lines %>%
+  filter(st_geometry_type(geometry) == "LINESTRING") %>%
+  filter(sapply(st_geometry(.), function(x) nrow(st_coordinates(x))) >= 2)
+
+st_write(valid_traj_lines,
+         file.path(out_path, "intermediate/trajectory_lines.geojson"),
+         delete_dsn = TRUE)
+
+# Save EPA monitoring stations with smoke PM values
+st_write(smokePM_avg,
+         file.path(out_path, "intermediate/epa_smoke_monitors.geojson"),
+         delete_dsn = TRUE)
+
+message("Saved intermediate files for Figure 1: smoke_exposure_cts.geojson, trajectory_lines.geojson, epa_smoke_monitors.geojson")
 
 
 
