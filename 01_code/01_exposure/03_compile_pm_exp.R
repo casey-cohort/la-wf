@@ -266,22 +266,32 @@ plot_layers <- list(geom_sf(data = ca, inherit.aes = FALSE, fill = NA),
   reduce(.x = plot_layers, .f = `+`, .init = .)
 
 # to figure out what that X% should be, look at how many buffered points overlap each of the stations vs station avg smoke pm2.5
-keep_traj %>%
+traj_station_overlap <- keep_traj %>%
   st_buffer(dist = traj_buffer) %>%
   # intersect with the station locations
-  st_intersects(st_as_sf(smokePM_avg), .) %>% 
-  # that output of the intersection comes out as a list, 
+  st_intersects(st_as_sf(smokePM_avg), .) %>%
+  # that output of the intersection comes out as a list,
   # so take the length of each item in the list and tack it onto the station df
-  purrr::map_dbl(length) %>% 
-  cbind(smokePM_avg, n_point = .) %>% 
-  {ggplot(data = ., aes(x = n_point, y = smokePM)) + 
-      geom_point(alpha = 0.6, size = 6) + 
-      geom_vline(xintercept = thresh_high) + 
-      geom_vline(xintercept = thresh_low) + 
-      annotate("text", x = 125, y = 5, label = paste0("cor = ", round(cor(.$n_point, .$smokePM), 3))) + 
-      xlab("Number of buffered \ntrajectories overlapping") + ylab("Average smoke pm2.5") + 
-      theme_classic() + theme(axis.title = element_text(size = 18),
-                              axis.text = element_text(size = 16))}
+  purrr::map_dbl(length) %>%
+  cbind(smokePM_avg, n_point = .)
+
+{ggplot(data = traj_station_overlap, aes(x = n_point, y = smokePM)) +
+    geom_point(alpha = 0.6, size = 6) +
+    geom_vline(xintercept = thresh_high) +
+    geom_vline(xintercept = thresh_low) +
+    annotate("text", x = 125, y = 5, label = paste0("cor = ", round(cor(traj_station_overlap$n_point, traj_station_overlap$smokePM), 3))) +
+    xlab("Number of buffered \ntrajectories overlapping") + ylab(expression(paste("Average wildfire PM"[2.5]))) +
+    theme_classic() + theme(axis.title = element_text(size = 18),
+                            axis.text = element_text(size = 16))}
+
+# write out trajectory-station overlap data for paper figure (scatter plot)
+traj_station_overlap %>%
+  st_drop_geometry() %>%
+  select(id, smokePM, n_point) %>%
+  write.csv(file.path(out_path, "intermediate/traj_station_overlap.csv"), row.names = FALSE)
+# save thresholds used for exposure categorization (for plot vertical lines)
+write.csv(data.frame(thresh_low = thresh_low, thresh_high = thresh_high),
+          file.path(out_path, "intermediate/traj_thresholds.csv"), row.names = FALSE)
 
 #--------------------------------
 # determine CT exposure: 
@@ -453,7 +463,18 @@ st_write(smokePM_avg,
          file.path(out_path, "intermediate/epa_smoke_monitors.geojson"),
          delete_dsn = TRUE)
 
+# Save trajectory-station overlap data for scatter plot (trajectories vs smoke PM)
+traj_station_overlap %>%
+  st_drop_geometry() %>%
+  select(id, smokePM, n_point) %>%
+  write.csv(file.path(out_path, "intermediate/traj_station_overlap.csv"), row.names = FALSE)
+
+# Save threshold values for the scatter plot
+write.csv(data.frame(param = c("thresh_low", "thresh_high"), value = c(thresh_low, thresh_high)),
+          file.path(out_path, "intermediate/traj_station_thresholds.csv"), row.names = FALSE)
+
 message("Saved intermediate files for Figure 1: smoke_exposure_cts.geojson, trajectory_lines.geojson, epa_smoke_monitors.geojson")
+message("Saved trajectory-station overlap data: traj_station_overlap.csv, traj_station_thresholds.csv")
 
 
 
