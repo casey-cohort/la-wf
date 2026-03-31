@@ -1,6 +1,6 @@
 #-------------------------------
 # LA wildfires project
-# author: Nina Flores, adapted by Lauren Wilner
+# author: adapted by Lauren Wilner (original code author: Nina Flores)
 # date: 2025-09-02
 # this code processes data that were generated using google earth engine
 # https://code.earthengine.google.com/d2d445308d1bfd4fe810ff138a3e68b3?noload=true
