@@ -9,7 +9,7 @@
 #   - covariate_dictionary.csv      labels, units, sources
 #   - covariate_summary_long.csv    mean/SD/min/max by covariate, exposure, period
 #   - covariate_table.csv           table-ready mean (SD) by exposure group
-#   - covariate_correlation_long.csv Pearson r among model covariates
+#   - covariate_correlation_long.csv Spearman rho among model covariates
 #   - covariate_correlation_wide.csv same correlations, one matrix per exposure x period
 #-------------------------------
 
@@ -246,7 +246,7 @@ cor_long <- cov_daily %>%
   group_modify(function(df, key) {
     mat <- df %>%
       select(all_of(all_vars)) %>%
-      cor(use = "pairwise.complete.obs")
+      cor(use = "pairwise.complete.obs", method = "spearman")
     as_tibble(mat, rownames = "covariate_1") %>%
       pivot_longer(-covariate_1, names_to = "covariate_2", values_to = "correlation")
   }) %>%
